@@ -17,4 +17,5 @@ apikeys.py
 # Local control-panel runtime files — contain your credentials/answers, never commit
 user_config.json
 .bot_run.log
-.bot_run.pid.DS_Store
+.bot_run.pid
+.DS_Store
