@@ -15,7 +15,7 @@ version:    26.01.20.5.08
 '''
 
 from config.settings import click_gap, smooth_scroll
-from modules.helpers import buffer, print_lg, sleep
+from modules.helpers import buffer, print_lg, sleep, human_type
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -121,7 +121,7 @@ def text_input_by_ID(driver: WebDriver, id: str, value: str, time: float=5.0) ->
     '''
     username_field = WebDriverWait(driver, time).until(EC.presence_of_element_located((By.ID, id)))
     username_field.send_keys(Keys.CONTROL + "a")
-    username_field.send_keys(value)
+    human_type(username_field, value)
 
 def try_xp(driver: WebDriver, xpath: str, click: bool=True) -> WebElement | bool:
     try:
@@ -149,7 +149,7 @@ def company_search_click(driver: WebDriver, actions: ActionChains, companyName: 
     wait_span_click(driver,"Add a company",1)
     search = driver.find_element(By.XPATH,"(.//input[@placeholder='Add a company'])[1]")
     search.send_keys(Keys.CONTROL + "a")
-    search.send_keys(companyName)
+    human_type(search, companyName)
     buffer(3)
     actions.send_keys(Keys.DOWN).perform()
     actions.send_keys(Keys.ENTER).perform()
@@ -160,7 +160,7 @@ def text_input(actions: ActionChains, textInputEle: WebElement | bool, value: st
         sleep(1)
         # actions.key_down(Keys.CONTROL).send_keys("a").key_up(Keys.CONTROL).perform()
         textInputEle.clear()
-        textInputEle.send_keys(value.strip())
+        human_type(textInputEle, value.strip())
         sleep(2)
         actions.send_keys(Keys.ENTER).perform()
     else:

@@ -159,6 +159,19 @@ def buffer(speed: int=0) -> None:
         return sleep(randint(18,round(speed)*10)*0.1)
     
 
+def human_type(element, text: str, min_delay_ms: int = 25, max_delay_ms: int = 110) -> None:
+    '''
+    Types `text` into `element` one character at a time with a small randomized
+    delay between keystrokes, instead of one instant `send_keys(text)` call.
+    Automated typing lands every character in the same event tick; real typing
+    doesn't - keeping this human-paced avoids that as a bot signal, particularly
+    on login and on custom application-question answers.
+    '''
+    for char in text:
+        element.send_keys(char)
+        sleep(randint(min_delay_ms, max_delay_ms) / 1000)
+
+
 def manual_login_retry(is_logged_in: callable, limit: int = 2) -> None:
     '''
     Function to ask and validate manual login

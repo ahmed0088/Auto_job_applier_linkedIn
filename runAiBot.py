@@ -689,7 +689,7 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                         randomly_answered_questions.add((label_org, "text"))
                         answer = years_of_experience
                 text.clear()
-                text.send_keys(answer)
+                human_type(text, answer)
                 if do_actions:
                     sleep(2)
                     actions.send_keys(Keys.ARROW_DOWN)
@@ -721,7 +721,7 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                     else:
                         randomly_answered_questions.add((label_org, "textarea"))
             text_area.clear()
-            text_area.send_keys(answer)
+            human_type(text_area, answer)
             if do_actions:
                     sleep(2)
                     actions.send_keys(Keys.ARROW_DOWN)
