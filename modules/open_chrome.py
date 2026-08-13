@@ -61,6 +61,14 @@ def createChromeSession(isRetry: bool = False):
     make_directories([file_name,failed_file_name,logs_folder_path+"/screenshots",default_resume_path,generated_resume_path+"/temp"])
     # Set up WebDriver with Chrome Profile
     options = uc.ChromeOptions() if auto_manage_driver else Options()
+    # Force English regardless of the system/geo-detected locale (e.g. Arabic in the UAE) - the
+    # rest of this tool looks for English button/link text ("Review", "Submit application",
+    # "Sign in", etc.) throughout LinkedIn's UI, and every one of those lookups silently fails
+    # if the page renders in another language. --lang only sets Chrome's own UI language; the
+    # "intl.accept_languages" pref is what actually controls the Accept-Language header sites
+    # like LinkedIn use to pick a content language.
+    options.add_argument("--lang=en-US")
+    options.add_experimental_option("prefs", {"intl.accept_languages": "en-US,en"})
     if run_in_background:   options.add_argument("--headless")
     if disable_extensions:  options.add_argument("--disable-extensions")
 

@@ -21,9 +21,10 @@ version:    26.01.20.5.08
 
 __validation_file_path = ""
 
-def check_int(var: int, var_name: str, min_value: int=0) -> bool | TypeError | ValueError:
+def check_int(var: int, var_name: str, min_value: int=0, max_value: int|None=None) -> bool | TypeError | ValueError:
     if not isinstance(var, int): raise TypeError(f'The variable "{var_name}" in "{__validation_file_path}" must be an Integer!\nReceived "{var}" of type "{type(var)}" instead!\n\nSolution:\nPlease open "{__validation_file_path}" and update "{var_name}" to be an Integer.\nExample: `{var_name} = 10`\n\nNOTE: Do NOT surround Integer values in quotes ("10")X !\n\n')
     if var < min_value: raise ValueError(f'The variable "{var_name}" in "{__validation_file_path}" expects an Integer greater than or equal to `{min_value}`! Received `{var}` instead!\n\nSolution:\nPlease open "{__validation_file_path}" and update "{var_name}" accordingly.')
+    if max_value is not None and var > max_value: raise ValueError(f'The variable "{var_name}" in "{__validation_file_path}" expects an Integer less than or equal to `{max_value}`! Received `{var}` instead!\n\nSolution:\nPlease open "{__validation_file_path}" and update "{var_name}" accordingly.')
     return True
 
 def check_boolean(var: bool, var_name: str) -> bool | ValueError:
@@ -164,7 +165,7 @@ def validate_secrets() -> None | ValueError | TypeError:
     check_boolean(use_AI, "use_AI")
     check_string(llm_api_url, "llm_api_url", min_length=5)
     check_string(llm_api_key, "llm_api_key")
-    check_string(ai_provider, "ai_provider", ["openai", "deepseek", "gemini"])
+    check_string(ai_provider, "ai_provider", ["openai", "deepseek", "gemini", "anthropic"])
     check_string(llm_model, "llm_model")
 
 
@@ -193,6 +194,17 @@ def validate_settings() -> None | ValueError | TypeError:
     check_string(logs_folder_path, "logs_folder_path", min_length=1)
 
     check_int(click_gap, "click_gap", 0)
+
+    check_int(min_application_gap, "min_application_gap", 0)
+    check_int(max_application_gap, "max_application_gap", 0)
+    check_int(max_applications_per_run, "max_applications_per_run", 0)
+    check_int(max_applications_per_day, "max_applications_per_day", 0)
+    check_boolean(restrict_active_hours, "restrict_active_hours")
+    check_int(active_hours_start, "active_hours_start", 0, 23)
+    check_int(active_hours_end, "active_hours_end", 0, 23)
+    check_int(extended_break_every, "extended_break_every", 0)
+    check_int(extended_break_min, "extended_break_min", 0)
+    check_int(extended_break_max, "extended_break_max", 0)
 
     check_boolean(run_in_background, "run_in_background")
     check_boolean(disable_extensions, "disable_extensions")

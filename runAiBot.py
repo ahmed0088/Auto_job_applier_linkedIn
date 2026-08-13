@@ -826,8 +826,9 @@ def failed_job(job_id: str, job_link: str, resume: str, date_listed, error: str,
             writer.writerow({key: truncate_for_csv(value) for key, value in record.items()})
             file.close()
     except Exception as e:
-        print_lg("Failed to update failed jobs list!", e)
-        pyautogui.alert("Failed to update the excel of failed jobs!\nProbably because of 1 of the following reasons:\n1. The file is currently open or in use by another program\n2. Permission denied to write to the file\n3. Failed to find the file", "Failed Logging")
+        # Logged only, not a blocking alert - a locked/permission-denied file shouldn't hang an
+        # unattended run; the reason is already captured here for later review.
+        print_lg("Failed to update failed jobs list! Probably the file is open elsewhere, permission denied, or missing.", e)
 
 
 def screenshot(driver: WebDriver, job_id: str, failedAt: str) -> str:
@@ -868,8 +869,8 @@ def submitted_jobs(job_id: str, title: str, company: str, work_location: str, wo
             writer.writerow({key: truncate_for_csv(value) for key, value in record.items()})
         csv_file.close()
     except Exception as e:
-        print_lg("Failed to update submitted jobs list!", e)
-        pyautogui.alert("Failed to update the excel of applied jobs!\nProbably because of 1 of the following reasons:\n1. The file is currently open or in use by another program\n2. Permission denied to write to the file\n3. Failed to find the file", "Failed Logging")
+        # Logged only, not a blocking alert - see note in failed_job() above.
+        print_lg("Failed to update submitted jobs list! Probably the file is open elsewhere, permission denied, or missing.", e)
 
 
 
@@ -1062,7 +1063,8 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                         except:
                             pass
                     if is_easy_apply:
-                        try: 
+                        modal = None
+                        try:
                             try:
                                 errored = ""
                                 modal = find_by_class(driver, "jobs-easy-apply-modal")
@@ -1108,7 +1110,7 @@ def apply_to_jobs(search_terms: list[str]) -> None:
                                     # resumes automatically on the next one instead of staying off for the rest of
                                     # the run.
                                     # try_xp(modal, ".//span[normalize-space(.)='Review']")
-                                follow_company(modal)
+                                if modal is not None: follow_company(modal)
                                 if wait_span_click(driver, "Submit application", 2, scrollTop=True): 
                                     date_applied = datetime.now()
                                     if not wait_span_click(driver, "Done", 2): actions.send_keys(Keys.ESCAPE).perform()
@@ -1226,15 +1228,18 @@ chatGPT_tab = False
 linkedIn_tab = False
 
 def main() -> None:
-    pyautogui.alert("Please consider sponsoring this project at:\n\nhttps://github.com/sponsors/GodsScion\n\n", "Support the project", "Okay")
+    # Logged only, not a blocking alert - this used to stop every single run from starting until
+    # someone was there to click "Okay", which defeats running the tool unattended.
+    print_lg("Please consider sponsoring this project at: https://github.com/sponsors/GodsScion")
     total_runs = 1
     try:
         global linkedIn_tab, tabs_count, useNewResume, aiClient
-        alert_title = "Error Occurred. Closing Browser!"
         validate_config()
         
         if not os.path.exists(default_resume_path):
-            pyautogui.alert(text='Your default resume "{}" is missing! Please update it\'s folder path "default_resume_path" in config.py\n\nOR\n\nAdd a resume with exact name and path (check for spelling mistakes including cases).\n\n\nFor now the bot will continue using your previous upload from LinkedIn!'.format(default_resume_path), title="Missing Resume", button="OK")
+            # Logged only, not a blocking alert - the bot already has a sensible fallback
+            # (useNewResume = False keeps your last resume on LinkedIn), so there's nothing to wait on.
+            print_lg(f'Your default resume "{default_resume_path}" is missing! Continuing with your previous upload from LinkedIn instead. Check the "default_resume_path" setting for spelling/case mistakes.')
             useNewResume = False
         
         # Login to LinkedIn
@@ -1279,8 +1284,9 @@ def main() -> None:
     except (NoSuchWindowException, WebDriverException) as e:
         print_lg("The browser window was closed or the session became invalid. Exiting.", e)
     except Exception as e:
+        # Logged only, not a blocking alert - critical_error_log() already captured this above;
+        # an unattended run shouldn't hang forever on an unexpected error instead of cleaning up.
         critical_error_log("In Applier Main", e)
-        pyautogui.alert(e,alert_title)
     finally:
         summary = "Total runs: {}\nJobs Easy Applied: {}\nExternal job links collected: {}\nTotal applied or collected: {}\nFailed jobs: {}\nIrrelevant jobs skipped: {}\n".format(total_runs,easy_applied_count,external_jobs_count,easy_applied_count + external_jobs_count,failed_count,skip_count)
         print_lg(summary)
@@ -1313,11 +1319,11 @@ def main() -> None:
             timeSaved += 60
             timeSavedMsg = f"In this run, you saved approx {round(timeSaved/60)} mins ({timeSaved} secs), please consider supporting the project."
         msg = f"{quotes}\n\n\n{timeSavedMsg}\nYou can also get your quote and name shown here, or prioritize your bug reports by supporting the project at:\n\nhttps://github.com/sponsors/GodsScion\n\n\nSummary:\n{summary}\n\n\nBest regards,\nSai Vignesh Golla\nhttps://www.linkedin.com/in/saivigneshgolla/\n\nTop Sponsors:\n{sponsors}"
-        pyautogui.alert(msg, "Exiting..")
+        # Logged only, not a blocking alert - this used to stop the browser from closing at the
+        # end of every run until someone was there to click it.
         print_lg(msg,"Closing the browser...")
         if tabs_count >= 10:
-            msg = "NOTE: IF YOU HAVE MORE THAN 10 TABS OPENED, PLEASE CLOSE OR BOOKMARK THEM!\n\nOr it's highly likely that application will just open browser and not do anything next time!" 
-            pyautogui.alert(msg,"Info")
+            msg = "NOTE: IF YOU HAVE MORE THAN 10 TABS OPENED, PLEASE CLOSE OR BOOKMARK THEM!\n\nOr it's highly likely that application will just open browser and not do anything next time!"
             print_lg("\n"+msg)
         if use_AI and aiClient:
             try:

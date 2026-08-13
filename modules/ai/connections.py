@@ -72,6 +72,8 @@ def _resolve_provider(name: Optional[str]) -> str:
     n = (name or "openai").strip().lower()
     if n in ("gemini", "google", "google_genai", "google-genai"):
         return "google_genai"
+    if n in ("anthropic", "claude"):
+        return "anthropic"
     return "openai"
 
 
@@ -129,6 +131,10 @@ def create_ai_client() -> Optional[AIClient]:
             if api_key and api_key.lower() != "not-needed":
                 os.environ.setdefault("GOOGLE_API_KEY", api_key)
             model = init_chat_model(model_name, model_provider="google_genai", **kwargs)
+        elif provider == "anthropic":
+            if api_key and api_key.lower() != "not-needed":
+                os.environ.setdefault("ANTHROPIC_API_KEY", api_key)
+            model = init_chat_model(model_name, model_provider="anthropic", **kwargs)
         else:
             base_url = (getattr(cfg, "llm_api_url", "") or "").strip()
             # OpenAI-compatible servers accept any key; use a placeholder when none is given.

@@ -10,35 +10,43 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Auto Job Applier - Applied Jobs History</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236d6bf5'/%3E%3Cstop offset='1' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M17.5 6 9 18h5.5L14 26l8.5-12H17L17.5 6Z' fill='white'/%3E%3C/svg%3E">
     <style>
         :root {
-            --bg: #f4f6f9;
+            --bg: #f3f4f9;
+            --bg-soft: #eceef5;
             --card: #ffffff;
-            --ink: #1f2733;
-            --muted: #6b7684;
-            --line: #dce1e8;
-            --brand: #2563eb;
-            --brand-dark: #1d4ed8;
-            --ok: #16a34a;
+            --ink: #171a2b;
+            --muted: #666e83;
+            --line: #e2e5ee;
+            --brand: #5457e0;
+            --brand2: #06b6d4;
+            --brand-dark: #4345c4;
+            --ok: #17a06a;
             --danger: #dc2626;
-            --thead-bg: #f1f4f8;
-            --row-alt: #fafbfc;
-            --shadow: 0 1px 3px rgba(16,24,40,.08), 0 1px 2px rgba(16,24,40,.06);
+            --thead-bg: #f2f3f9;
+            --row-alt: #f9fafc;
+            --shadow: 0 1px 2px rgba(23,26,43,.05), 0 6px 16px -6px rgba(23,26,43,.10);
+            --radius: 14px;
+            color-scheme: light;
         }
         @media (prefers-color-scheme: dark) {
             :root {
-                --bg: #0f172a;
-                --card: #1a2436;
-                --ink: #e5e9f0;
-                --muted: #93a0b4;
-                --line: #2c3a52;
-                --brand: #5b8def;
-                --brand-dark: #7fa5f2;
-                --ok: #34d399;
-                --danger: #f87171;
-                --thead-bg: #202c42;
-                --row-alt: #17202f;
-                --shadow: 0 1px 3px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.3);
+                --bg: #090b12;
+                --bg-soft: #0d0f18;
+                --card: #12141f;
+                --ink: #eaecf5;
+                --muted: #8b90a6;
+                --line: #232636;
+                --brand: #7b7ef7;
+                --brand2: #29e0f2;
+                --brand-dark: #9497fb;
+                --ok: #33d693;
+                --danger: #ff6b6b;
+                --thead-bg: #171a27;
+                --row-alt: #0f111b;
+                --shadow: 0 1px 2px rgba(0,0,0,.35), 0 6px 18px -6px rgba(0,0,0,.5);
+                color-scheme: dark;
             }
         }
         * { box-sizing: border-box; }
@@ -47,23 +55,36 @@
             margin: 0;
             overflow-x: hidden;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background: var(--bg);
+            background:
+                radial-gradient(1100px 480px at 50% -180px, color-mix(in srgb, var(--brand) 10%, transparent), transparent),
+                var(--bg);
             color: var(--ink);
             line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
         }
         header {
-            background: var(--card);
+            background: color-mix(in srgb, var(--card) 88%, transparent);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
             border-bottom: 1px solid var(--line);
-            padding: 20px 24px;
+            padding: 18px 24px;
         }
-        header h1 { margin: 0 0 4px; font-size: 20px; }
-        header p { margin: 0; color: var(--muted); font-size: 14px; }
+        .brandrow { display: flex; align-items: center; gap: 12px; }
+        .brandmark {
+            width: 38px; height: 38px; border-radius: 11px; flex: none;
+            background: linear-gradient(135deg, var(--brand), var(--brand2));
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: var(--shadow);
+        }
+        .brandmark svg { width: 20px; height: 20px; }
+        header h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.01em; }
+        header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
         .wrap { width: 100%; max-width: 1100px; margin: 0 auto; padding: 0 16px; }
         main.wrap { padding: 24px 16px 40px; }
         .card {
             background: var(--card);
             border: 1px solid var(--line);
-            border-radius: 10px;
+            border-radius: var(--radius);
             box-shadow: var(--shadow);
             padding: 16px;
         }
@@ -78,8 +99,8 @@
             font-size: 13.5px;
         }
         table.history th, table.history td {
-            border: 1px solid var(--line);
-            padding: 9px 11px;
+            border-bottom: 1px solid var(--line);
+            padding: 10px 12px;
             text-align: left;
             vertical-align: top;
             white-space: nowrap;
@@ -87,11 +108,15 @@
         table.history td.wraps { white-space: normal; }
         table.history th {
             background: var(--thead-bg);
-            font-weight: 600;
+            font-weight: 700;
+            font-size: 11.5px;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            color: var(--muted);
             user-select: none;
         }
-        table.history tbody tr:nth-child(even) { background: var(--row-alt); }
-        table.history a { color: var(--brand); text-decoration: none; }
+        table.history tbody tr:hover { background: var(--row-alt); }
+        table.history a { color: var(--brand); text-decoration: none; font-weight: 600; }
         table.history a:hover { text-decoration: underline; }
         .sort-toggle {
             background: none;
@@ -137,9 +162,14 @@
 </head>
 <body>
     <header>
-        <div class="wrap">
-            <h1>Applied Jobs History</h1>
-            <p>Every job the bot has applied to (or queued for you to apply to), in one place.</p>
+        <div class="wrap brandrow">
+            <div class="brandmark">
+                <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg>
+            </div>
+            <div>
+                <h1>Applied Jobs History</h1>
+                <p>Every job the bot has applied to (or queued for you to apply to), in one place.</p>
+            </div>
         </div>
     </header>
 

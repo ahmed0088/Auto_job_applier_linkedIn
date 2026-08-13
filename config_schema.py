@@ -58,6 +58,9 @@ AI_MODELS = {
         "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash",
         "gemini-1.5-flash", "gemini-1.5-pro",
     ],
+    "anthropic": [
+        "claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5-20251001", "claude-fable-5",
+    ],
 }
 
 
@@ -98,8 +101,8 @@ SCHEMA = [
             _f("Account", "secrets", "use_AI", "Use AI", "bool",
                "Master switch for AI help (tailoring answers, resumes and cover letters). Turn this on only if you have a paid API key or a local AI model running. While it's off, all the AI settings below are disabled."),
             _f("Account", "secrets", "ai_provider", "AI provider", "select",
-               "Which AI service to use. Pick 'openai' for OpenAI or any OpenAI-compatible service (including local ones like Ollama or LM Studio), 'deepseek' for DeepSeek, or 'gemini' for Google Gemini.",
-               options=["openai", "deepseek", "gemini"], ai=True),
+               "Which AI service to use. Pick 'openai' for OpenAI or any OpenAI-compatible service (including local ones like Ollama or LM Studio), 'deepseek' for DeepSeek, 'gemini' for Google Gemini, or 'anthropic' for Claude.",
+               options=["openai", "deepseek", "gemini", "anthropic"], ai=True),
             _f("Account", "secrets", "llm_model", "AI model", "text",
                "The model to use. Pick a suggestion from the list or type any model name your provider supports.",
                ai=True, models_by_provider=AI_MODELS),
@@ -108,7 +111,7 @@ SCHEMA = [
                ai=True),
             # --- advanced AI plumbing ---
             _f("Account", "secrets", "llm_api_url", "AI API URL", "text",
-               "The address of your AI service. Examples: https://api.openai.com/v1/ , http://localhost:1234/v1/ , https://api.deepseek.com . Keep the trailing slash. You may not need this for Gemini.",
+               "The address of your AI service. Examples: https://api.openai.com/v1/ , http://localhost:1234/v1/ , https://api.deepseek.com . Keep the trailing slash. You don't need this for Gemini or Anthropic.",
                ai=True, advanced=True),
             _f("Account", "settings", "showAiErrorAlerts", "Show AI error alerts", "bool",
                "Pop up an alert if there's a problem connecting to the AI service.",
@@ -247,6 +250,8 @@ SCHEMA = [
                "Pause on the final screen of each application so you can review it before it's sent. Recommended on. Ignored when 'Run in background' is on."),
             _f("Run settings", "questions", "pause_at_failed_question", "Pause on hard questions", "bool",
                "Pause and wait for you when the tool can't confidently answer a question. If off, it answers randomly. Ignored when 'Run in background' is on."),
+            _f("Run settings", "search", "pause_after_filters", "Pause after applying search filters", "bool",
+               "Pause once after each search term's filters are applied, so you can double-check them before it starts applying. Off by default so the tool can run fully unattended - turn on if you want to review filters the first time."),
             _f("Run settings", "settings", "max_applications_per_run", "Max applications per run", "number",
                "Automatically stop after this many applications in one run (Easy Apply + external combined), instead of applying unattended for as long as jobs are available. Set to 0 for no limit."),
             _f("Run settings", "settings", "max_applications_per_day", "Max applications per day", "number",

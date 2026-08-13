@@ -75,7 +75,7 @@ fair_chance_employer = False       # True or False, Note: True or False are case
 ## >>>>>>>>>>> RELATED SETTING <<<<<<<<<<<
 
 # Pause after applying filters to let you modify the search results and filters?
-pause_after_filters = True         # True or False, Note: True or False are case-sensitive
+pause_after_filters = False        # True or False, Note: True or False are case-sensitive
 
 ##
 
