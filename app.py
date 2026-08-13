@@ -165,7 +165,7 @@ def _effective_config() -> dict:
     Only keys defined in config_schema are included.
     '''
     effective = copy.deepcopy(DEFAULTS)
-    user = _overrides.load_user_config()
+    user = _overrides.load_user_config(get_active_profile())
     for field in config_schema.iter_fields():
         module_name = field["config_module"]
         key = field["key"]
@@ -509,8 +509,8 @@ def api_save_config():
     if unknown:
         return jsonify({"error": "Unknown settings rejected", "unknown": unknown}), 400
 
-    # Read-modify-write user_config.json.
-    current = _overrides.load_user_config()
+    # Read-modify-write the active profile's user_config.json.
+    current = _overrides.load_user_config(get_active_profile())
     for section, values in coerced.items():
         target = current.get(section)
         if not isinstance(target, dict):

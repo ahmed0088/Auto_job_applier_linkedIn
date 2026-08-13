@@ -63,13 +63,18 @@ def user_config_path_for(name: str) -> str:
     return os.path.join(profile_dir(name), "user_config.json")
 
 
-def load_user_config() -> dict:
+def load_user_config(profile: str = None) -> dict:
     '''
-    Returns the full override dictionary for the ACTIVE profile's
-    user_config.json, or an empty dict if it's missing, unreadable, or not
-    valid JSON. Never raises.
+    Returns the full override dictionary for `profile`'s user_config.json (or
+    the AUTO_APPLIER_PROFILE-active profile if `profile` isn't given), or an
+    empty dict if it's missing, unreadable, or not valid JSON. Never raises.
+
+    `profile` exists for callers like app.py that track the active profile
+    themselves (a file, since the control panel's own process never has
+    AUTO_APPLIER_PROFILE set - only the bot subprocess it launches does).
     '''
-    path = user_config_path_for(active_profile_name())
+    name = profile if profile is not None else active_profile_name()
+    path = user_config_path_for(name)
     try:
         with open(path, "r", encoding="utf-8") as file:
             data = json.load(file)
