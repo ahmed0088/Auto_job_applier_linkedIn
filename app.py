@@ -25,9 +25,11 @@ from werkzeug.utils import secure_filename
 import csv
 from datetime import datetime
 import os
+import re
 import sys
 import json
 import copy
+import shutil
 import signal
 import subprocess
 import threading
@@ -49,6 +51,65 @@ PATH = 'all excels/'
 
 RESUME_UPLOAD_DIR = os.path.join(ROOT, "all resumes", "default")
 ALLOWED_RESUME_EXTENSIONS = {".pdf", ".doc", ".docx"}
+
+
+# ===========================================================================
+# Profiles - run this tool for more than one LinkedIn account from one
+# installation. "default" is always your existing setup, unchanged; any other
+# profile gets its own settings, resume, application history, and browser
+# session (see config/_overrides.py and modules/helpers.py).
+# ===========================================================================
+ACTIVE_PROFILE_PATH = os.path.join(ROOT, ".active_profile")
+_PROFILE_NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$')
+
+
+def _profile_exists(name: str) -> bool:
+    return name == "default" or os.path.isdir(_overrides.profile_dir(name))
+
+
+def list_profiles() -> list:
+    names = ["default"]
+    if os.path.isdir(_overrides.PROFILES_DIR):
+        for entry in sorted(os.listdir(_overrides.PROFILES_DIR)):
+            if entry != "default" and os.path.isdir(os.path.join(_overrides.PROFILES_DIR, entry)):
+                names.append(entry)
+    return names
+
+
+def get_active_profile() -> str:
+    try:
+        with open(ACTIVE_PROFILE_PATH, "r", encoding="utf-8") as f:
+            name = f.read().strip()
+    except OSError:
+        return "default"
+    return name if name and _profile_exists(name) else "default"
+
+
+def _resume_dir_for(name: str) -> str:
+    if name == "default":
+        return RESUME_UPLOAD_DIR
+    return os.path.join(_overrides.profile_dir(name), "resume")
+
+
+def _history_dir_for(name: str) -> str:
+    if name == "default":
+        return os.path.join(ROOT, "all excels")
+    return _overrides.profile_dir(name)
+
+
+def _chrome_profile_dir_for(name: str) -> str:
+    '''
+    Mirrors modules/helpers.py's get_default_temp_profile() so profile deletion
+    can also clean up that profile's isolated Chrome browser session. Keep the
+    two in sync if that logic ever changes.
+    '''
+    suffix = "" if name == "default" else f"-{name}"
+    home = os.path.expanduser("~")
+    if sys.platform.startswith("win"):
+        return f"C:\\temp\\auto-job-apply-profile{suffix}"
+    elif sys.platform.startswith("linux"):
+        return os.path.join(home, f".auto-job-apply-profile{suffix}")
+    return os.path.join(home, "Library", "Application Support", "Google", "Chrome", f"auto-job-apply-profile{suffix}")
 
 
 # ===========================================================================
@@ -252,7 +313,7 @@ _HISTORY_FIELDS = {
 @app.route('/applied-jobs', methods=['GET'])
 def get_applied_jobs():
     """Return the applied-jobs history as JSON for the history page."""
-    csv_path = os.path.join(PATH, _HISTORY_CSV)
+    csv_path = os.path.join(_history_dir_for(get_active_profile()), _HISTORY_CSV)
     if not os.path.exists(csv_path):
         return jsonify({"error": "No applications history found yet."}), 404
     try:
@@ -268,7 +329,7 @@ def get_applied_jobs():
 @app.route('/applied-jobs/<job_id>', methods=['PUT'])
 def mark_job_applied(job_id):
     """Stamp one job's 'Date Applied' (matched by Job ID) with the current time."""
-    csv_path = os.path.join(PATH, _HISTORY_CSV)
+    csv_path = os.path.join(_history_dir_for(get_active_profile()), _HISTORY_CSV)
     if not os.path.exists(csv_path):
         return jsonify({"error": f"History file not found at {csv_path}"}), 404
     try:
@@ -304,10 +365,10 @@ def api_schema():
 @app.route('/api/upload-resume', methods=['POST'])
 def api_upload_resume():
     '''
-    Accepts a resume file (multipart form field "resume"), saves it under
-    `all resumes/default/`, and returns the project-relative path to use as
-    `default_resume_path`. Does not touch user_config.json itself - the UI
-    saves the returned path through the normal /api/config flow.
+    Accepts a resume file (multipart form field "resume"), saves it under the
+    ACTIVE profile's resume folder, and returns the project-relative path to
+    use as `default_resume_path`. Does not touch user_config.json itself - the
+    UI saves the returned path through the normal /api/config flow.
     '''
     file = request.files.get('resume')
     if not file or not file.filename:
@@ -318,13 +379,90 @@ def api_upload_resume():
     if ext not in ALLOWED_RESUME_EXTENSIONS:
         return jsonify({"error": "Please upload a PDF or Word document (.pdf, .doc, .docx)"}), 400
 
+    profile = get_active_profile()
+    upload_dir = _resume_dir_for(profile)
     try:
-        os.makedirs(RESUME_UPLOAD_DIR, exist_ok=True)
-        file.save(os.path.join(RESUME_UPLOAD_DIR, filename))
+        os.makedirs(upload_dir, exist_ok=True)
+        file.save(os.path.join(upload_dir, filename))
     except OSError as err:
         return jsonify({"error": f"Could not save the file: {err}"}), 500
 
-    return jsonify({"path": f"all resumes/default/{filename}"})
+    rel_path = f"all resumes/default/{filename}" if profile == "default" else f"profiles/{profile}/resume/{filename}"
+    return jsonify({"path": rel_path})
+
+
+@app.route('/api/profiles', methods=['GET'])
+def api_list_profiles():
+    '''Lists every profile and which one is currently active.'''
+    return jsonify({"profiles": list_profiles(), "active": get_active_profile()})
+
+
+@app.route('/api/profiles', methods=['POST'])
+def api_create_profile():
+    '''Creates a new, empty profile (its own settings/resume/history/browser session).'''
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name", "")).strip()
+    if not _PROFILE_NAME_RE.match(name):
+        return jsonify({"error": "Profile name must be 1-40 characters: letters, numbers, - or _ only, starting with a letter or number."}), 400
+    if name.lower() == "default":
+        return jsonify({"error": '"default" is reserved for your existing profile.'}), 400
+    if _profile_exists(name):
+        return jsonify({"error": f'A profile named "{name}" already exists.'}), 400
+    try:
+        pdir = _overrides.profile_dir(name)
+        os.makedirs(pdir, exist_ok=True)
+        os.makedirs(os.path.join(pdir, "resume"), exist_ok=True)
+        os.makedirs(os.path.join(pdir, "logs", "screenshots"), exist_ok=True)
+        config_path = _overrides.user_config_path_for(name)
+        if not os.path.exists(config_path):
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump({}, f)
+    except OSError as err:
+        return jsonify({"error": f"Could not create profile: {err}"}), 500
+    return jsonify({"profiles": list_profiles(), "active": get_active_profile()})
+
+
+@app.route('/api/profiles/active', methods=['POST'])
+def api_set_active_profile():
+    '''Switches which profile the control panel (and the next run) uses.'''
+    with _bot_lock:
+        if _is_running():
+            return jsonify({"error": "Stop the current run before switching profiles."}), 409
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name", "")).strip()
+    if not _profile_exists(name):
+        return jsonify({"error": f'Profile "{name}" does not exist.'}), 404
+    try:
+        with open(ACTIVE_PROFILE_PATH, "w", encoding="utf-8") as f:
+            f.write(name)
+    except OSError as err:
+        return jsonify({"error": f"Could not switch profile: {err}"}), 500
+    return jsonify({"profiles": list_profiles(), "active": get_active_profile()})
+
+
+@app.route('/api/profiles/<name>', methods=['DELETE'])
+def api_delete_profile(name):
+    '''Deletes a profile's settings/resume/history, and its isolated Chrome session.'''
+    if name == "default":
+        return jsonify({"error": "The default profile can't be deleted."}), 400
+    if not _profile_exists(name):
+        return jsonify({"error": f'Profile "{name}" does not exist.'}), 404
+    if get_active_profile() == name:
+        return jsonify({"error": "Switch to a different profile before deleting this one."}), 400
+    with _bot_lock:
+        if _is_running():
+            return jsonify({"error": "Stop the current run before deleting a profile."}), 409
+    try:
+        shutil.rmtree(_overrides.profile_dir(name))
+    except OSError as err:
+        return jsonify({"error": f"Could not delete profile folder: {err}"}), 500
+    try:
+        chrome_dir = _chrome_profile_dir_for(name)
+        if chrome_dir and os.path.isdir(chrome_dir):
+            shutil.rmtree(chrome_dir)
+    except OSError:
+        pass
+    return jsonify({"profiles": list_profiles(), "active": get_active_profile()})
 
 
 @app.route('/api/config', methods=['GET'])
@@ -380,8 +518,10 @@ def api_save_config():
         target.update(values)
         current[section] = target
 
+    config_path = _overrides.user_config_path_for(get_active_profile())
     try:
-        with open(USER_CONFIG_PATH, "w", encoding="utf-8") as file:
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as file:
             json.dump(current, file, indent=2, ensure_ascii=False)
     except OSError as err:
         return jsonify({"error": f"Could not save settings: {err}"}), 500
@@ -404,6 +544,9 @@ def api_run():
                 "cwd": ROOT,
                 "stdout": log_file,
                 "stderr": subprocess.STDOUT,
+                # Tells config/_overrides.py and modules/helpers.py which profile's
+                # settings, resume, history, and browser session to use.
+                "env": {**os.environ, "AUTO_APPLIER_PROFILE": get_active_profile()},
             }
             if os.name == "nt":
                 popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP

@@ -19,3 +19,8 @@ user_config.json
 .bot_run.log
 .bot_run.pid
 .DS_Store
+
+# Per-profile settings/resume/history (see config/_overrides.py) — contain
+# credentials and personal data for every profile, never commit
+profiles
+.active_profile

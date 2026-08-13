@@ -52,12 +52,17 @@ def make_directories(paths: list[str]) -> None:
 
 def get_default_temp_profile() -> str:
     # Thanks to https://github.com/vinodbavage31 for suggestion!
+    # Each profile (see config/_overrides.py) gets its own Chrome user-data-dir,
+    # so switching profiles never mixes login sessions - the "default" profile
+    # keeps the exact path used before profiles existed.
+    profile = (os.environ.get("AUTO_APPLIER_PROFILE") or "").strip() or "default"
+    suffix = "" if profile == "default" else f"-{profile}"
     home = pathlib.Path.home()
     if sys.platform.startswith('win'):
-        return "--user-data-dir=C:\\temp\\auto-job-apply-profile"
+        return f"--user-data-dir=C:\\temp\\auto-job-apply-profile{suffix}"
     elif sys.platform.startswith('linux'):
-        return str(home / ".auto-job-apply-profile")
-    return str(home / "Library" / "Application Support" / "Google" / "Chrome" / "auto-job-apply-profile")
+        return str(home / f".auto-job-apply-profile{suffix}")
+    return str(home / "Library" / "Application Support" / "Google" / "Chrome" / f"auto-job-apply-profile{suffix}")
 
 
 def find_default_profile_directory() -> str | None:
