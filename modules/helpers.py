@@ -59,7 +59,10 @@ def get_default_temp_profile() -> str:
     suffix = "" if profile == "default" else f"-{profile}"
     home = pathlib.Path.home()
     if sys.platform.startswith('win'):
-        return f"--user-data-dir=C:\\temp\\auto-job-apply-profile{suffix}"
+        # Bare path only - open_chrome.py already prepends "--user-data-dir=" for
+        # every platform, so including it here too produced a malformed,
+        # doubled-up flag on Windows specifically.
+        return f"C:\\temp\\auto-job-apply-profile{suffix}"
     elif sys.platform.startswith('linux'):
         return str(home / f".auto-job-apply-profile{suffix}")
     return str(home / "Library" / "Application Support" / "Google" / "Chrome" / f"auto-job-apply-profile{suffix}")
