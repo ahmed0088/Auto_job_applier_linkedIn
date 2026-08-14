@@ -617,10 +617,42 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
             else: answer = prev_answer
             questions_list.add((label_org+" ]", answer, "radio", prev_answer))
             continue
-        
+
+        # Check if it's a date/calendar picker question (e.g. Date of birth, Expected start date).
+        # LinkedIn's date-picker input is also an `input[type='text']`, so this must be checked
+        # before the generic text question below, otherwise it falls through to being typed into
+        # like free text and left with a half-open calendar overlay.
+        date_field = try_xp(Question, ".//input[@placeholder='mm/dd/yyyy']", False)
+        if date_field:
+            label = try_xp(Question, ".//label[@for]", False)
+            try: label = label.find_element(By.CLASS_NAME, 'visually-hidden')
+            except: pass
+            label_org = label.text if label else "Unknown"
+            label = label_org.lower()
+            prev_answer = date_field.get_attribute("value")
+            is_birth_question = 'birth' in label or 'born' in label or 'dob' in label
+            if not prev_answer or overwrite_previous_answers:
+                if is_birth_question and date_of_birth:
+                    date_field.clear()
+                    human_type(date_field, date_of_birth)
+                    # Close the calendar overlay without letting it pick "today" over the typed date
+                    actions.send_keys(Keys.ESCAPE).perform()
+                elif is_birth_question:
+                    print_lg(f'Skipping date question "{label_org}" - set `date_of_birth` in config/questions.py (format: mm/dd/yyyy) to answer it automatically.')
+                    randomly_answered_questions.add((label_org, "date"))
+                    actions.send_keys(Keys.ESCAPE).perform()
+                else:
+                    # Default to today's date for non birth-date questions (e.g. availability/start date).
+                    # Searched from `modal`, not `Question`, since LinkedIn's calendar overlay isn't
+                    # necessarily nested inside the question's own container in the DOM.
+                    if not try_xp(modal, ".//button[contains(@aria-label, 'This is today')]"):
+                        randomly_answered_questions.add((label_org, "date"))
+            questions_list.add((label, date_field.get_attribute("value"), "date", prev_answer))
+            continue
+
         # Check if it's a text question
         text = try_xp(Question, ".//input[@type='text']", False)
-        if text: 
+        if text:
             do_actions = False
             label = try_xp(Question, ".//label[@for]", False)
             try: label = label.find_element(By.CLASS_NAME,'visually-hidden')
@@ -749,9 +781,6 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
             questions_list.add((f'{label} ([X] {answer})', checked, "checkbox", prev_answer))
             continue
 
-
-    # Select todays date
-    try_xp(driver, "//button[contains(@aria-label, 'This is today')]")
 
     # Collect important skills
     # if 'do you have' in label and 'experience' in label and ' in ' in label -> Get word (skill) after ' in ' from label
