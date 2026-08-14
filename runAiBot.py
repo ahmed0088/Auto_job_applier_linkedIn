@@ -554,10 +554,23 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                         if matched:
                             break
                     if not matched:
-                        print_lg(f'No option matched "{answer}" for "{label_org}", picking one at random.')
-                        select.select_by_index(randint(1, len(select.options) - 1))
-                        answer = select.first_selected_option.text
-                        randomly_answered_questions.add((f'{label_org} [ {options} ]', "select"))
+                        ai_answer = ""
+                        if use_AI and aiClient:
+                            try:
+                                ai_answer = answer_question(aiClient, label_org, options=optionsText, question_type="single_select", job_description=job_description, user_information_all=user_information_all)
+                            except Exception as e:
+                                print_lg("Failed to get AI answer!", e)
+                        ai_answer = (ai_answer or "").strip()
+                        matched_option = next((o for o in optionsText if o.lower() == ai_answer.lower()), None)
+                        if matched_option:
+                            select.select_by_visible_text(matched_option)
+                            answer = matched_option
+                            print_lg(f'AI answered "{label_org}": "{answer}"')
+                        else:
+                            print_lg(f'No option matched "{answer}" for "{label_org}", picking one at random.')
+                            select.select_by_index(randint(1, len(select.options) - 1))
+                            answer = select.first_selected_option.text
+                            randomly_answered_questions.add((f'{label_org} [ {options} ]', "select"))
             questions_list.add((f'{label_org} [ {options} ]', answer, "select", prev_answer))
             continue
         
@@ -575,11 +588,13 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
             label_org += ' [ '
             options = radio.find_elements(By.TAG_NAME, 'input')
             options_labels = []
-            
+            plain_options_labels = []
+
             for option in options:
                 id = option.get_attribute("id")
                 option_label = try_xp(radio, f'.//label[@for="{id}"]', False)
-                options_labels.append( f'"{option_label.text if option_label else "Unknown"}"<{option.get_attribute("value")}>' ) # Saving option as "label <value>"
+                plain_options_labels.append(option_label.text if option_label else "Unknown")
+                options_labels.append( f'"{plain_options_labels[-1]}"<{option.get_attribute("value")}>' ) # Saving option as "label <value>"
                 if option.is_selected(): prev_answer = options_labels[-1]
                 label_org += f' {options_labels[-1]},'
 
@@ -590,30 +605,36 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                     answer = disability_status
                 else: answer = answer_common_questions(label,answer)
                 foundOption = try_xp(radio, f".//label[normalize-space()='{answer}']", False)
-                if foundOption: 
+                if foundOption:
                     actions.move_to_element(foundOption).click().perform()
-                else:    
-                    possible_answer_phrases = ["Decline", "not wish", "don't wish", "Prefer not", "not want"] if answer == 'Decline' else [answer]
-                    ele = options[0]
-                    answer = options_labels[0]
-                    for phrase in possible_answer_phrases:
-                        for i, option_label in enumerate(options_labels):
-                            if phrase in option_label:
-                                foundOption = options[i]
-                                ele = foundOption
-                                answer = f'Decline ({option_label})' if len(possible_answer_phrases) > 1 else option_label
-                                break
-                        if foundOption: break
-                    # if answer == 'Decline':
-                    #     answer = options_labels[0]
-                    #     for phrase in ["Prefer not", "not want", "not wish"]:
-                    #         foundOption = try_xp(radio, f".//label[normalize-space()='{phrase}']", False)
-                    #         if foundOption:
-                    #             answer = f'Decline ({phrase})'
-                    #             ele = foundOption
-                    #             break
+                else:
+                    ai_answer = ""
+                    if use_AI and aiClient:
+                        try:
+                            ai_answer = answer_question(aiClient, label_org.rstrip(' ['), options=plain_options_labels, question_type="single_select", job_description=job_description, user_information_all=user_information_all)
+                        except Exception as e:
+                            print_lg("Failed to get AI answer!", e)
+                    ai_answer = (ai_answer or "").strip()
+                    ai_index = next((i for i, o in enumerate(plain_options_labels) if o.lower() == ai_answer.lower()), None)
+                    if ai_index is not None:
+                        foundOption = options[ai_index]
+                        ele = foundOption
+                        answer = options_labels[ai_index]
+                        print_lg(f'AI answered "{label_org}": "{answer}"')
+                    else:
+                        possible_answer_phrases = ["Decline", "not wish", "don't wish", "Prefer not", "not want"] if answer == 'Decline' else [answer]
+                        ele = options[0]
+                        answer = options_labels[0]
+                        for phrase in possible_answer_phrases:
+                            for i, option_label in enumerate(options_labels):
+                                if phrase in option_label:
+                                    foundOption = options[i]
+                                    ele = foundOption
+                                    answer = f'Decline ({option_label})' if len(possible_answer_phrases) > 1 else option_label
+                                    break
+                            if foundOption: break
+                        if not foundOption: randomly_answered_questions.add((f'{label_org} ]',"radio"))
                     actions.move_to_element(ele).click().perform()
-                    if not foundOption: randomly_answered_questions.add((f'{label_org} ]',"radio"))
             else: answer = prev_answer
             questions_list.add((label_org+" ]", answer, "radio", prev_answer))
             continue
