@@ -48,6 +48,7 @@ from modules.validator import validate_config
 
 if use_AI:
     from modules.ai.connections import create_ai_client, extract_skills, answer_question, close_ai_client
+    from modules.resumes.extractor import extract_resume_text
 
 from typing import Literal
 
@@ -1283,7 +1284,7 @@ def main() -> None:
     print_lg("Please consider sponsoring this project at: https://github.com/sponsors/GodsScion")
     total_runs = 1
     try:
-        global linkedIn_tab, tabs_count, useNewResume, aiClient
+        global linkedIn_tab, tabs_count, useNewResume, aiClient, user_information_all
         validate_config()
         
         if not os.path.exists(default_resume_path):
@@ -1312,6 +1313,13 @@ def main() -> None:
         #         print_lg("Opening OpenAI chatGPT tab failed!")
         if use_AI:
             aiClient = create_ai_client()
+            # Feed the actual resume file's content to the AI, in addition to whatever is
+            # manually typed into `user_information_all` - otherwise the AI only ever sees
+            # what you typed in config, never what's actually on your resume.
+            resume_text = extract_resume_text(default_resume_path)
+            if resume_text:
+                user_information_all = f"{user_information_all}\n\nResume:\n{resume_text}" if user_information_all.strip() else resume_text
+                print_lg(f"Loaded your resume ({len(resume_text)} characters) to use as AI context.")
 
         # Start applying to jobs
         driver.switch_to.window(linkedIn_tab)
