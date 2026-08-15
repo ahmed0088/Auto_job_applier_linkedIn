@@ -19,18 +19,21 @@ SECURITY: this app handles LinkedIn credentials, so it binds to 127.0.0.1 only
 (never 0.0.0.0) and runs with debug OFF. Do not change these.
 '''
 
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import csv
 from datetime import datetime
 import os
+import io
 import re
 import sys
 import json
 import copy
 import shutil
 import signal
+import zipfile
+import tempfile
 import subprocess
 import threading
 import importlib
@@ -393,8 +396,8 @@ def api_upload_resume():
 
 @app.route('/api/profiles', methods=['GET'])
 def api_list_profiles():
-    '''Lists every profile and which one is currently active.'''
-    return jsonify({"profiles": list_profiles(), "active": get_active_profile()})
+    '''Lists every profile, which one is currently active, and whether there's any saved data yet.'''
+    return jsonify({"profiles": list_profiles(), "active": get_active_profile(), "has_data": _has_any_saved_data()})
 
 
 @app.route('/api/profiles', methods=['POST'])
@@ -465,6 +468,65 @@ def api_delete_profile(name):
     return jsonify({"profiles": list_profiles(), "active": get_active_profile()})
 
 
+# Data considered "yours" - never part of the git-tracked project itself (see
+# .gitignore) - that import/export moves between installs. Relative paths;
+# nothing here needs to exist for any given user, existence is checked at
+# copy/zip time.
+PORTABLE_DATA_PATHS = [
+    os.path.join("config", "secrets.py"),
+    os.path.join("config", "personals.py"),
+    "user_config.json",
+    "profiles",
+    "all resumes",
+    "all excels",
+]
+
+
+def _copy_portable_data(source_dir: str, dest_dir: str) -> tuple:
+    '''
+    Copies every path in PORTABLE_DATA_PATHS that exists under `source_dir`
+    into the matching path under `dest_dir`. Returns (imported, errors), both
+    lists of relative-path strings (errors formatted as "path: reason").
+    '''
+    imported, errors = [], []
+    for rel_path in PORTABLE_DATA_PATHS:
+        src = os.path.join(source_dir, rel_path)
+        dst = os.path.join(dest_dir, rel_path)
+        try:
+            if os.path.isfile(src):
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(src, dst)
+                imported.append(rel_path)
+            elif os.path.isdir(src):
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+                imported.append(rel_path)
+        except OSError as err:
+            errors.append(f"{rel_path}: {err}")
+    return imported, errors
+
+
+def _has_any_saved_data() -> bool:
+    '''Whether this install already has real user data, vs. being a fresh download.'''
+    if os.path.isfile(os.path.join(ROOT, "config", "secrets.py")):
+        return True
+    if os.path.isfile(USER_CONFIG_PATH) and os.path.getsize(USER_CONFIG_PATH) > 2:  # more than just "{}"
+        return True
+    if list_profiles():
+        return True
+    return False
+
+
+def _safe_extract_zip(zf: zipfile.ZipFile, dest_dir: str) -> None:
+    '''Extracts `zf` into `dest_dir`, refusing any entry that would land outside it
+    (a maliciously-crafted zip using ../ or an absolute path - "zip slip").'''
+    dest_abs = os.path.abspath(dest_dir)
+    for member in zf.namelist():
+        member_abs = os.path.abspath(os.path.join(dest_dir, member))
+        if member_abs != dest_abs and not member_abs.startswith(dest_abs + os.sep):
+            raise ValueError(f"Unsafe path in backup file: {member}")
+    zf.extractall(dest_dir)
+
+
 @app.route('/api/import-data', methods=['POST'])
 def api_import_data():
     '''
@@ -493,39 +555,7 @@ def api_import_data():
     if os.path.abspath(source_dir) == os.path.abspath(ROOT):
         return jsonify({"error": "That's this project's own folder - pick your OTHER copy instead."}), 400
 
-    imported = []
-    errors = []
-
-    def copy_file(rel_path):
-        src = os.path.join(source_dir, rel_path)
-        dst = os.path.join(ROOT, rel_path)
-        if not os.path.isfile(src):
-            return
-        try:
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copy2(src, dst)
-            imported.append(rel_path)
-        except OSError as err:
-            errors.append(f"{rel_path}: {err}")
-
-    def copy_dir(rel_path):
-        src = os.path.join(source_dir, rel_path)
-        dst = os.path.join(ROOT, rel_path)
-        if not os.path.isdir(src):
-            return
-        try:
-            shutil.copytree(src, dst, dirs_exist_ok=True)
-            imported.append(rel_path)
-        except OSError as err:
-            errors.append(f"{rel_path}: {err}")
-
-    copy_file(os.path.join("config", "secrets.py"))
-    copy_file(os.path.join("config", "personals.py"))
-    copy_file("user_config.json")
-    copy_dir("profiles")
-    copy_dir("all resumes")
-    copy_dir("all excels")
-
+    imported, errors = _copy_portable_data(source_dir, ROOT)
     if not imported and not errors:
         return jsonify({"error": "Didn't find anything to import in that folder - is it the right project folder?"}), 400
 
@@ -535,6 +565,71 @@ def api_import_data():
         "profiles": list_profiles(),
         "active": get_active_profile(),
     })
+
+
+@app.route('/api/import-data-file', methods=['POST'])
+def api_import_data_file():
+    '''
+    Same as /api/import-data, but the source is an uploaded .zip (from
+    /api/export-data) instead of a local folder path - for moving data from a
+    different computer, where there's no shared filesystem path to point at.
+    '''
+    with _bot_lock:
+        if _is_running():
+            return jsonify({"error": "Stop the current run before importing data."}), 409
+    file = request.files.get('backup')
+    if not file or not file.filename:
+        return jsonify({"error": "Please choose a backup .zip file."}), 400
+    if not file.filename.lower().endswith('.zip'):
+        return jsonify({"error": "That doesn't look like a .zip file exported from this tool."}), 400
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        try:
+            with zipfile.ZipFile(file.stream) as zf:
+                _safe_extract_zip(zf, tmp_dir)
+        except (zipfile.BadZipFile, ValueError) as err:
+            return jsonify({"error": f"That file isn't a valid backup: {err}"}), 400
+        imported, errors = _copy_portable_data(tmp_dir, ROOT)
+
+    if not imported and not errors:
+        return jsonify({"error": "That backup file didn't contain anything recognizable to import."}), 400
+
+    return jsonify({
+        "imported": imported,
+        "errors": errors,
+        "profiles": list_profiles(),
+        "active": get_active_profile(),
+    })
+
+
+@app.route('/api/export-data', methods=['GET'])
+def api_export_data():
+    '''
+    Downloads a single .zip with everything /api/import-data(-file) can
+    restore: secrets, personal info, user_config.json, and every profile
+    (settings, resume, application history). For moving data to a different
+    computer, or just as a manual backup - folder-to-folder import already
+    covers moving between two folders on the same machine.
+    '''
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        wrote_anything = False
+        for rel_path in PORTABLE_DATA_PATHS:
+            abs_path = os.path.join(ROOT, rel_path)
+            if os.path.isfile(abs_path):
+                zf.write(abs_path, rel_path)
+                wrote_anything = True
+            elif os.path.isdir(abs_path):
+                for dirpath, _dirnames, filenames in os.walk(abs_path):
+                    for filename in filenames:
+                        file_abs = os.path.join(dirpath, filename)
+                        zf.write(file_abs, os.path.relpath(file_abs, ROOT))
+                        wrote_anything = True
+        if not wrote_anything:
+            zf.writestr("README.txt", "No saved data found in this install yet - nothing to back up.")
+    buffer.seek(0)
+    filename = f"auto_job_applier_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    return send_file(buffer, mimetype="application/zip", as_attachment=True, download_name=filename)
 
 
 @app.route('/api/config', methods=['GET'])

@@ -384,6 +384,7 @@
                 <p>Set up everything here, then open the Run tab to start. Nothing is uploaded - your details are saved only on this computer.</p>
             </div>
             <div id="profileSwitcher" class="profile-switcher"></div>
+            <input type="file" id="importFileInput" accept=".zip" style="display:none">
         </div>
     </header>
 
@@ -996,6 +997,8 @@
         var ADD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
         var TRASH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>';
         var IMPORT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>';
+        var IMPORT_FILE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M12 18v-6m0 0-2.5 2.5M12 12l2.5 2.5"/></svg>';
+        var EXPORT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 0L8 7m4-4 4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>';
 
         function renderProfileSwitcher(profiles, active) {
             var wrap = document.getElementById('profileSwitcher');
@@ -1015,9 +1018,16 @@
             addBtn.addEventListener('click', createProfile);
             wrap.appendChild(addBtn);
 
-            var importBtn = el('button', { type: 'button', class: 'icon-btn', title: 'Import saved data from another copy of this project', 'aria-label': 'Import saved data from another copy of this project', html: IMPORT_ICON });
+            var importBtn = el('button', { type: 'button', class: 'icon-btn', title: 'Import saved data from another folder on this computer', 'aria-label': 'Import saved data from another folder on this computer', html: IMPORT_ICON });
             importBtn.addEventListener('click', importData);
             wrap.appendChild(importBtn);
+
+            var importFileBtn = el('button', { type: 'button', class: 'icon-btn', title: 'Import saved data from a backup .zip file', 'aria-label': 'Import saved data from a backup .zip file', html: IMPORT_FILE_ICON });
+            importFileBtn.addEventListener('click', importDataFile);
+            wrap.appendChild(importFileBtn);
+
+            var exportBtn = el('a', { href: '/api/export-data', class: 'icon-btn', title: 'Download all your saved data as a backup .zip file', 'aria-label': 'Download all your saved data as a backup .zip file', html: EXPORT_ICON });
+            wrap.appendChild(exportBtn);
 
             if (active !== 'default') {
                 var delBtn = el('button', { type: 'button', class: 'icon-btn danger', title: 'Delete this profile', 'aria-label': 'Delete this profile', html: TRASH_ICON });
@@ -1030,9 +1040,25 @@
             return fetch('/api/profiles').then(function (r) { return r.json(); })
                 .then(function (data) {
                     renderProfileSwitcher(data.profiles || ['default'], data.active || 'default');
+                    maybeShowOnboarding(!!data.has_data);
                     return data;
                 })
                 .catch(function () {});
+        }
+
+        // Fresh install with nothing saved yet - offer to import instead of forcing a
+        // blank form. Asked once per browser (localStorage), never again after that,
+        // regardless of the answer - the import/export icons stay available either way.
+        function maybeShowOnboarding(hasData) {
+            if (hasData) return;
+            if (localStorage.getItem('aja_onboarding_seen')) return;
+            localStorage.setItem('aja_onboarding_seen', '1');
+            if (!confirm('Welcome! This looks like a fresh install with no saved data yet.\n\nDo you want to import your existing data (login, resume, application history) from somewhere else?\n\nOK = Yes, import existing data\nCancel = No, start fresh')) return;
+            if (confirm('Where from?\n\nOK = Another folder on THIS computer (e.g. an older download)\nCancel = A backup .zip file (e.g. exported from a different computer)')) {
+                importData();
+            } else {
+                importDataFile();
+            }
         }
 
         function switchProfile(name) {
@@ -1081,6 +1107,33 @@
                 })
                 .catch(function () { alert('Could not import data - is the control panel still running?'); });
         }
+
+        function importDataFile() {
+            var input = document.getElementById('importFileInput');
+            if (input) input.click();
+        }
+
+        (function () {
+            var input = document.getElementById('importFileInput');
+            if (!input) return;
+            input.addEventListener('change', function (e) {
+                var file = e.target.files[0];
+                e.target.value = ''; // reset so picking the same file again still fires 'change'
+                if (!file) return;
+                var formData = new FormData();
+                formData.append('backup', file);
+                fetch('/api/import-data-file', { method: 'POST', body: formData })
+                    .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                    .then(function (result) {
+                        if (!result.ok) { alert(result.data.error || 'Could not import that backup file.'); return; }
+                        var msg = 'Imported: ' + (result.data.imported.length ? result.data.imported.join(', ') : 'nothing');
+                        if (result.data.errors && result.data.errors.length) msg += '\n\nProblems:\n' + result.data.errors.join('\n');
+                        alert(msg);
+                        location.reload();
+                    })
+                    .catch(function () { alert('Could not import that backup file - is the control panel still running?'); });
+            });
+        })();
 
         function deleteProfile(name) {
             if (!confirm('Delete profile "' + name + '"?\n\nThis permanently removes its settings, resume, application history, and its browser login session. This cannot be undone.')) return;
