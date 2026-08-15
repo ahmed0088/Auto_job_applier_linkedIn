@@ -38,7 +38,7 @@ from langgraph.graph import StateGraph, START, END
 import config.secrets as cfg
 from config.settings import showAiErrorAlerts
 from modules.helpers import print_lg, critical_error_log, convert_to_json
-from modules.ai.prompts import extract_skills_prompt, ai_answer_prompt
+from modules.ai.prompts import extract_skills_prompt, ai_answer_prompt, profile_extraction_prompt
 
 try:
     from pyautogui import confirm
@@ -192,6 +192,56 @@ def extract_skills(client: Optional[AIClient], job_description: str, stream: boo
             return convert_to_json(_msg_text(client.model.invoke(prompt)))
         except Exception as e2:
             _ai_error_alert("Could not extract skills from the job description.", e2)
+            return {"error": str(e2)}
+
+
+# --------------------------------------------------------------------------- #
+# Profile extraction from a resume (structured output)
+# --------------------------------------------------------------------------- #
+class ExtractedProfile(BaseModel):
+    '''
+    Profile fields extracted from resume text. Deliberately excludes anything a
+    resume isn't a reliable or appropriate source for (gender, ethnicity,
+    disability status, veteran status, date of birth, etc.) - see
+    profile_extraction_prompt for the full instruction not to guess those.
+    '''
+    first_name: str = Field(default="", description="First name")
+    middle_name: str = Field(default="", description="Middle name, if any")
+    last_name: str = Field(default="", description="Last name")
+    phone_number: str = Field(default="", description="Phone number")
+    current_city: str = Field(default="", description="City currently living in")
+    state: str = Field(default="", description="State or region")
+    country: str = Field(default="", description="Country")
+    street: str = Field(default="", description="Street address, if listed")
+    zipcode: str = Field(default="", description="ZIP or postal code, if listed")
+    linkedIn: str = Field(default="", description="LinkedIn profile URL, if listed")
+    website: str = Field(default="", description="Personal website or portfolio URL, if listed")
+    years_of_experience: str = Field(default="", description="Total years of professional experience, as a number in a string")
+    recent_employer: str = Field(default="", description="Most recent employer name")
+    linkedin_headline: str = Field(default="", description="A short professional headline summarizing the person")
+    linkedin_summary: str = Field(default="", description="A few sentences summarizing background and skills")
+
+
+def extract_profile_info(client: Optional[AIClient], resume_text: str) -> dict:
+    '''
+    Extract profile fields (name, contact info, experience, ...) from resume text.
+    Returns a dict of field -> value (empty string for anything not found), or an
+    ``{"error": ...}`` dict on failure.
+    '''
+    if not client or not resume_text:
+        return {"error": "AI client unavailable or empty resume text."}
+    prompt = profile_extraction_prompt.format(resume_text)
+    try:
+        structured = client.model.with_structured_output(ExtractedProfile)
+        result = structured.invoke(prompt)
+        return result.model_dump()
+    except Exception as e:
+        # Some local or older models don't support structured output — fall back to plain JSON parsing.
+        print_lg("Structured profile extraction unavailable, falling back to plain parsing.", e)
+        try:
+            return convert_to_json(_msg_text(client.model.invoke(prompt)))
+        except Exception as e2:
+            _ai_error_alert("Could not extract profile info from the resume.", e2)
             return {"error": str(e2)}
 
 

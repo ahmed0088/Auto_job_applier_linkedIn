@@ -511,9 +511,56 @@
                     .finally(function () { fileInput.value = ''; });
             });
 
+            var fillBtn = el('button', { type: 'button', class: 'btn secondary', text: 'Fill profile from this resume ✨' });
+            var fillStatus = el('p', { class: 'help', id: 'fillFromResumeStatus', text: '' });
+            fillBtn.addEventListener('click', function () { fillFromResume(fillStatus); });
+
             var row = el('div', { class: 'resume-row' }, [input, btn, fileInput]);
-            var wrap = el('div', {}, [row, status]);
+            var wrap = el('div', {}, [row, status, fillBtn, fillStatus]);
             return wrap;
+        }
+
+        // Which config field each AI-extracted resume field maps to (mirrors
+        // ExtractedProfile in modules/ai/connections.py). Deliberately excludes
+        // gender/ethnicity/disability/veteran/date-of-birth - never AI-guessed
+        // from a resume, see profile_extraction_prompt.
+        var RESUME_FILL_FIELD_MAP = {
+            first_name: 'personals', middle_name: 'personals', last_name: 'personals',
+            phone_number: 'personals', current_city: 'personals', state: 'personals',
+            country: 'personals', street: 'personals', zipcode: 'personals',
+            linkedIn: 'questions', website: 'questions', years_of_experience: 'questions',
+            recent_employer: 'questions', linkedin_headline: 'questions', linkedin_summary: 'questions'
+        };
+
+        function fillFromResume(statusEl) {
+            if (statusEl) statusEl.textContent = 'Reading your resume with AI…';
+            fetch('/api/fill-from-resume', { method: 'POST' })
+                .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                .then(function (result) {
+                    if (!result.ok) {
+                        if (statusEl) statusEl.textContent = '';
+                        alert(result.data.error || 'Could not fill from resume.');
+                        return;
+                    }
+                    var filled = [];
+                    var fields = result.data.fields || {};
+                    Object.keys(fields).forEach(function (key) {
+                        var value = fields[key];
+                        var module = RESUME_FILL_FIELD_MAP[key];
+                        if (!module || value === '' || value === null || value === undefined) return;
+                        var target = document.getElementById('f__' + module + '__' + key);
+                        if (!target) return;
+                        target.value = value;
+                        filled.push(key);
+                    });
+                    if (statusEl) statusEl.textContent = filled.length
+                        ? 'Filled ' + filled.length + ' field(s) from your resume - review them, then click Save.'
+                        : "Didn't find anything new in your resume to fill in.";
+                })
+                .catch(function () {
+                    if (statusEl) statusEl.textContent = '';
+                    alert('Could not fill from resume - is the control panel still running?');
+                });
         }
 
         function renderControl(field) {

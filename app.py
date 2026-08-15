@@ -394,6 +394,68 @@ def api_upload_resume():
     return jsonify({"path": rel_path})
 
 
+def _create_ai_client_for_active_profile():
+    '''
+    Builds an AI client from the ACTIVE PROFILE's effective secrets (from
+    user_config.json), not whatever config.secrets held when this process (the
+    control panel, not the bot subprocess) first imported it. Mirrors the same
+    "temporarily override module attributes, then restore" pattern
+    _load_defaults() already uses for reading pristine defaults.
+    '''
+    import config.secrets as _secrets_module
+    from modules.ai.connections import create_ai_client
+    secrets = _effective_config().get("secrets", {})
+    patched_keys = ("use_AI", "ai_provider", "llm_model", "llm_api_key", "llm_api_url")
+    original = {key: getattr(_secrets_module, key, None) for key in patched_keys}
+    try:
+        for key in patched_keys:
+            if key in secrets:
+                setattr(_secrets_module, key, secrets[key])
+        return create_ai_client()
+    finally:
+        for key, value in original.items():
+            setattr(_secrets_module, key, value)
+
+
+@app.route('/api/fill-from-resume', methods=['POST'])
+def api_fill_from_resume():
+    '''
+    Reads the active profile's resume file and asks the AI to extract profile
+    fields from it (name, contact info, experience, ...). Returns them for the
+    frontend to pre-fill the form with - nothing is saved automatically, you
+    still review and click Save yourself. Deliberately never asks the AI to
+    guess demographic/EEO fields (gender, ethnicity, disability, veteran
+    status, date of birth) from a resume - see profile_extraction_prompt.
+    '''
+    effective = _effective_config()
+    if not effective.get("secrets", {}).get("use_AI"):
+        return jsonify({"error": 'Turn on "Use AI" and set an API key in the Account tab first.'}), 400
+
+    resume_path = str(effective.get("questions", {}).get("default_resume_path", "") or "").strip()
+    if not resume_path:
+        return jsonify({"error": "No resume path is set. Upload a resume first."}), 400
+    if not os.path.isabs(resume_path):
+        resume_path = os.path.join(ROOT, resume_path)
+    if not os.path.isfile(resume_path):
+        return jsonify({"error": f'Resume file not found at "{resume_path}". Upload a resume first.'}), 400
+
+    from modules.resumes.extractor import extract_resume_text
+    resume_text = extract_resume_text(resume_path)
+    if not resume_text:
+        return jsonify({"error": "Couldn't read any text from that resume file (unsupported format, or a scanned/image-only PDF)."}), 400
+
+    client = _create_ai_client_for_active_profile()
+    if not client:
+        return jsonify({"error": "Could not start the AI client - check your provider/model/API key in the Account tab."}), 400
+
+    from modules.ai.connections import extract_profile_info
+    result = extract_profile_info(client, resume_text)
+    if "error" in result:
+        return jsonify({"error": result["error"]}), 400
+
+    return jsonify({"fields": result})
+
+
 @app.route('/api/profiles', methods=['GET'])
 def api_list_profiles():
     '''Lists every profile, which one is currently active, and whether there's any saved data yet.'''

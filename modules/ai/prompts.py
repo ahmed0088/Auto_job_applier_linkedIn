@@ -29,6 +29,21 @@ JOB DESCRIPTION:
 #<
 
 
+##> Extract profile info from a resume
+# Used with `profile_extraction_prompt.format(resume_text)`.
+profile_extraction_prompt = """
+You are filling in a job seeker's profile form from their resume. Extract ONLY what the resume actually states - never guess, infer, or make up a value. If something isn't clearly stated in the resume, leave that field as an empty string.
+
+Do NOT extract or infer: gender, ethnicity, race, religion, disability status, veteran status, sexual orientation, marital status, age, or date of birth - a resume is not a reliable or appropriate source for these, and guessing wrong could actively harm the applicant. Leave any such field blank if asked for it.
+
+For years_of_experience, use the resume's own total if stated, otherwise estimate conservatively from the earliest job's start date to the most recent job's end date (or today, if current), as a whole number.
+
+RESUME:
+{}
+"""
+#<
+
+
 ##> Answer a form question
 # Used with `ai_answer_prompt.format(user_information, question)`.
 ai_answer_prompt = """
