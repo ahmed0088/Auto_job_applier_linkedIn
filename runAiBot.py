@@ -106,15 +106,18 @@ def is_logged_in_LN() -> bool:
     Function to check if user is logged-in in LinkedIn
     * Returns: `True` if user is logged-in or `False` if not
     '''
-    # Give the (JS-heavy) login page a moment to render before checking for its
-    # elements - checking instantly can race the page load and wrongly fall
-    # through to "assume logged in" below, skipping the actual login step.
     # Checks use the "username" field ID rather than English link/button text,
     # since LinkedIn renders the login page in whatever language the browser
     # profile defaults to (e.g. Arabic on a fresh guest profile in the UAE),
     # and IDs stay the same across languages while text like "Sign in" doesn't.
+    #
+    # Uses a longer, dedicated wait (rather than the shared 5s `wait`) because a
+    # cold start - fresh/guest Chrome profile, or auto_manage_driver still
+    # downloading chromedriver - can leave this JS-heavy page still rendering
+    # past 5s. Checking too early races the page load and wrongly falls through
+    # to "assume logged in" below, skipping the actual login step entirely.
     try:
-        wait.until(lambda d: d.current_url == "https://www.linkedin.com/feed/"
+        WebDriverWait(driver, 15).until(lambda d: d.current_url == "https://www.linkedin.com/feed/"
                    or try_xp(d, '//input[@id="username"]', False)
                    or try_xp(d, '//button[@type="submit"]', False)
                    or try_linkText(d, "Sign in")
@@ -126,6 +129,13 @@ def is_logged_in_LN() -> bool:
     if try_xp(driver, '//button[@type="submit"]', False): return False
     if try_linkText(driver, "Sign in"): return False
     if try_linkText(driver, "Join now"): return False
+    # Still sitting on LinkedIn's own login/verification URL - definitely not
+    # logged in, no matter what the element checks above found (or missed, e.g.
+    # due to a locale-specific page layout). Assuming "logged in" here would skip
+    # login_LN() and never type the configured credentials in at all.
+    if "linkedin.com/login" in driver.current_url or "linkedin.com/checkpoint" in driver.current_url:
+        print_lg(f"Still on LinkedIn's login/verification page, so assuming user is NOT logged in! Current URL: {driver.current_url}, Page title: {driver.title!r}")
+        return False
     try:
         driver.save_screenshot(logs_folder_path + "/screenshots/login_check_fallback.png")
     except Exception:
