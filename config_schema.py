@@ -183,6 +183,8 @@ SCHEMA = [
                "The name of your most recent employer.", advanced=True),
             _f("Profile", "questions", "confidence_level", "Confidence level (1-10)", "text",
                "For 'on a scale of 1-10, how much experience...' questions. Any number from 1 to 10.", advanced=True),
+            _f("Profile", "questions", "date_of_birth", "Date of birth", "text",
+               "Format: mm/dd/yyyy. Used to answer 'Date of birth' calendar-picker questions. Leave blank to skip such questions instead of guessing.", advanced=True),
         ],
     },
     {

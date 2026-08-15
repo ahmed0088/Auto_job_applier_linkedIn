@@ -48,6 +48,7 @@ from modules.validator import validate_config
 
 if use_AI:
     from modules.ai.connections import create_ai_client, extract_skills, answer_question, close_ai_client
+    from modules.resumes.extractor import extract_resume_text
 
 from typing import Literal
 
@@ -105,15 +106,18 @@ def is_logged_in_LN() -> bool:
     Function to check if user is logged-in in LinkedIn
     * Returns: `True` if user is logged-in or `False` if not
     '''
-    # Give the (JS-heavy) login page a moment to render before checking for its
-    # elements - checking instantly can race the page load and wrongly fall
-    # through to "assume logged in" below, skipping the actual login step.
     # Checks use the "username" field ID rather than English link/button text,
     # since LinkedIn renders the login page in whatever language the browser
     # profile defaults to (e.g. Arabic on a fresh guest profile in the UAE),
     # and IDs stay the same across languages while text like "Sign in" doesn't.
+    #
+    # Uses a longer, dedicated wait (rather than the shared 5s `wait`) because a
+    # cold start - fresh/guest Chrome profile, or auto_manage_driver still
+    # downloading chromedriver - can leave this JS-heavy page still rendering
+    # past 5s. Checking too early races the page load and wrongly falls through
+    # to "assume logged in" below, skipping the actual login step entirely.
     try:
-        wait.until(lambda d: d.current_url == "https://www.linkedin.com/feed/"
+        WebDriverWait(driver, 15).until(lambda d: d.current_url == "https://www.linkedin.com/feed/"
                    or try_xp(d, '//input[@id="username"]', False)
                    or try_xp(d, '//button[@type="submit"]', False)
                    or try_linkText(d, "Sign in")
@@ -125,6 +129,13 @@ def is_logged_in_LN() -> bool:
     if try_xp(driver, '//button[@type="submit"]', False): return False
     if try_linkText(driver, "Sign in"): return False
     if try_linkText(driver, "Join now"): return False
+    # Still sitting on LinkedIn's own login/verification URL - definitely not
+    # logged in, no matter what the element checks above found (or missed, e.g.
+    # due to a locale-specific page layout). Assuming "logged in" here would skip
+    # login_LN() and never type the configured credentials in at all.
+    if "linkedin.com/login" in driver.current_url or "linkedin.com/checkpoint" in driver.current_url:
+        print_lg(f"Still on LinkedIn's login/verification page, so assuming user is NOT logged in! Current URL: {driver.current_url}, Page title: {driver.title!r}")
+        return False
     try:
         driver.save_screenshot(logs_folder_path + "/screenshots/login_check_fallback.png")
     except Exception:
@@ -554,10 +565,23 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                         if matched:
                             break
                     if not matched:
-                        print_lg(f'No option matched "{answer}" for "{label_org}", picking one at random.')
-                        select.select_by_index(randint(1, len(select.options) - 1))
-                        answer = select.first_selected_option.text
-                        randomly_answered_questions.add((f'{label_org} [ {options} ]', "select"))
+                        ai_answer = ""
+                        if use_AI and aiClient:
+                            try:
+                                ai_answer = answer_question(aiClient, label_org, options=optionsText, question_type="single_select", job_description=job_description, user_information_all=user_information_all)
+                            except Exception as e:
+                                print_lg("Failed to get AI answer!", e)
+                        ai_answer = (ai_answer or "").strip()
+                        matched_option = next((o for o in optionsText if o.lower() == ai_answer.lower()), None)
+                        if matched_option:
+                            select.select_by_visible_text(matched_option)
+                            answer = matched_option
+                            print_lg(f'AI answered "{label_org}": "{answer}"')
+                        else:
+                            print_lg(f'No option matched "{answer}" for "{label_org}", picking one at random.')
+                            select.select_by_index(randint(1, len(select.options) - 1))
+                            answer = select.first_selected_option.text
+                            randomly_answered_questions.add((f'{label_org} [ {options} ]', "select"))
             questions_list.add((f'{label_org} [ {options} ]', answer, "select", prev_answer))
             continue
         
@@ -575,11 +599,13 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
             label_org += ' [ '
             options = radio.find_elements(By.TAG_NAME, 'input')
             options_labels = []
-            
+            plain_options_labels = []
+
             for option in options:
                 id = option.get_attribute("id")
                 option_label = try_xp(radio, f'.//label[@for="{id}"]', False)
-                options_labels.append( f'"{option_label.text if option_label else "Unknown"}"<{option.get_attribute("value")}>' ) # Saving option as "label <value>"
+                plain_options_labels.append(option_label.text if option_label else "Unknown")
+                options_labels.append( f'"{plain_options_labels[-1]}"<{option.get_attribute("value")}>' ) # Saving option as "label <value>"
                 if option.is_selected(): prev_answer = options_labels[-1]
                 label_org += f' {options_labels[-1]},'
 
@@ -590,37 +616,75 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
                     answer = disability_status
                 else: answer = answer_common_questions(label,answer)
                 foundOption = try_xp(radio, f".//label[normalize-space()='{answer}']", False)
-                if foundOption: 
+                if foundOption:
                     actions.move_to_element(foundOption).click().perform()
-                else:    
-                    possible_answer_phrases = ["Decline", "not wish", "don't wish", "Prefer not", "not want"] if answer == 'Decline' else [answer]
-                    ele = options[0]
-                    answer = options_labels[0]
-                    for phrase in possible_answer_phrases:
-                        for i, option_label in enumerate(options_labels):
-                            if phrase in option_label:
-                                foundOption = options[i]
-                                ele = foundOption
-                                answer = f'Decline ({option_label})' if len(possible_answer_phrases) > 1 else option_label
-                                break
-                        if foundOption: break
-                    # if answer == 'Decline':
-                    #     answer = options_labels[0]
-                    #     for phrase in ["Prefer not", "not want", "not wish"]:
-                    #         foundOption = try_xp(radio, f".//label[normalize-space()='{phrase}']", False)
-                    #         if foundOption:
-                    #             answer = f'Decline ({phrase})'
-                    #             ele = foundOption
-                    #             break
+                else:
+                    ai_answer = ""
+                    if use_AI and aiClient:
+                        try:
+                            ai_answer = answer_question(aiClient, label_org.rstrip(' ['), options=plain_options_labels, question_type="single_select", job_description=job_description, user_information_all=user_information_all)
+                        except Exception as e:
+                            print_lg("Failed to get AI answer!", e)
+                    ai_answer = (ai_answer or "").strip()
+                    ai_index = next((i for i, o in enumerate(plain_options_labels) if o.lower() == ai_answer.lower()), None)
+                    if ai_index is not None:
+                        foundOption = options[ai_index]
+                        ele = foundOption
+                        answer = options_labels[ai_index]
+                        print_lg(f'AI answered "{label_org}": "{answer}"')
+                    else:
+                        possible_answer_phrases = ["Decline", "not wish", "don't wish", "Prefer not", "not want"] if answer == 'Decline' else [answer]
+                        ele = options[0]
+                        answer = options_labels[0]
+                        for phrase in possible_answer_phrases:
+                            for i, option_label in enumerate(options_labels):
+                                if phrase in option_label:
+                                    foundOption = options[i]
+                                    ele = foundOption
+                                    answer = f'Decline ({option_label})' if len(possible_answer_phrases) > 1 else option_label
+                                    break
+                            if foundOption: break
+                        if not foundOption: randomly_answered_questions.add((f'{label_org} ]',"radio"))
                     actions.move_to_element(ele).click().perform()
-                    if not foundOption: randomly_answered_questions.add((f'{label_org} ]',"radio"))
             else: answer = prev_answer
             questions_list.add((label_org+" ]", answer, "radio", prev_answer))
             continue
-        
+
+        # Check if it's a date/calendar picker question (e.g. Date of birth, Expected start date).
+        # LinkedIn's date-picker input is also an `input[type='text']`, so this must be checked
+        # before the generic text question below, otherwise it falls through to being typed into
+        # like free text and left with a half-open calendar overlay.
+        date_field = try_xp(Question, ".//input[@placeholder='mm/dd/yyyy']", False)
+        if date_field:
+            label = try_xp(Question, ".//label[@for]", False)
+            try: label = label.find_element(By.CLASS_NAME, 'visually-hidden')
+            except: pass
+            label_org = label.text if label else "Unknown"
+            label = label_org.lower()
+            prev_answer = date_field.get_attribute("value")
+            is_birth_question = 'birth' in label or 'born' in label or 'dob' in label
+            if not prev_answer or overwrite_previous_answers:
+                if is_birth_question and date_of_birth:
+                    date_field.clear()
+                    human_type(date_field, date_of_birth)
+                    # Close the calendar overlay without letting it pick "today" over the typed date
+                    actions.send_keys(Keys.ESCAPE).perform()
+                elif is_birth_question:
+                    print_lg(f'Skipping date question "{label_org}" - set `date_of_birth` in config/questions.py (format: mm/dd/yyyy) to answer it automatically.')
+                    randomly_answered_questions.add((label_org, "date"))
+                    actions.send_keys(Keys.ESCAPE).perform()
+                else:
+                    # Default to today's date for non birth-date questions (e.g. availability/start date).
+                    # Searched from `modal`, not `Question`, since LinkedIn's calendar overlay isn't
+                    # necessarily nested inside the question's own container in the DOM.
+                    if not try_xp(modal, ".//button[contains(@aria-label, 'This is today')]"):
+                        randomly_answered_questions.add((label_org, "date"))
+            questions_list.add((label, date_field.get_attribute("value"), "date", prev_answer))
+            continue
+
         # Check if it's a text question
         text = try_xp(Question, ".//input[@type='text']", False)
-        if text: 
+        if text:
             do_actions = False
             label = try_xp(Question, ".//label[@for]", False)
             try: label = label.find_element(By.CLASS_NAME,'visually-hidden')
@@ -749,9 +813,6 @@ def answer_questions(modal: WebElement, questions_list: set, work_location: str,
             questions_list.add((f'{label} ([X] {answer})', checked, "checkbox", prev_answer))
             continue
 
-
-    # Select todays date
-    try_xp(driver, "//button[contains(@aria-label, 'This is today')]")
 
     # Collect important skills
     # if 'do you have' in label and 'experience' in label and ' in ' in label -> Get word (skill) after ' in ' from label
@@ -1233,7 +1294,7 @@ def main() -> None:
     print_lg("Please consider sponsoring this project at: https://github.com/sponsors/GodsScion")
     total_runs = 1
     try:
-        global linkedIn_tab, tabs_count, useNewResume, aiClient
+        global linkedIn_tab, tabs_count, useNewResume, aiClient, user_information_all
         validate_config()
         
         if not os.path.exists(default_resume_path):
@@ -1262,6 +1323,13 @@ def main() -> None:
         #         print_lg("Opening OpenAI chatGPT tab failed!")
         if use_AI:
             aiClient = create_ai_client()
+            # Feed the actual resume file's content to the AI, in addition to whatever is
+            # manually typed into `user_information_all` - otherwise the AI only ever sees
+            # what you typed in config, never what's actually on your resume.
+            resume_text = extract_resume_text(default_resume_path)
+            if resume_text:
+                user_information_all = f"{user_information_all}\n\nResume:\n{resume_text}" if user_information_all.strip() else resume_text
+                print_lg(f"Loaded your resume ({len(resume_text)} characters) to use as AI context.")
 
         # Start applying to jobs
         driver.switch_to.window(linkedIn_tab)

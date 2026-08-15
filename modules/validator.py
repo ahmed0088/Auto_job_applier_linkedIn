@@ -16,6 +16,7 @@ version:    26.01.20.5.08
 
 
 
+import re
 
 # from config.XdepricatedX import *
 
@@ -98,6 +99,8 @@ def validate_questions() -> None | ValueError | TypeError:
     check_string(cover_letter, "cover_letter")
     check_string(recent_employer, "recent_employer")
     check_string(confidence_level, "confidence_level")
+    if date_of_birth and not re.fullmatch(r"\d{2}/\d{2}/\d{4}", date_of_birth):
+        raise ValueError(f'The variable "date_of_birth" in "{__validation_file_path}" must be in "mm/dd/yyyy" format (or "" to leave it unanswered)! Received "{date_of_birth}" instead!')
 
     check_boolean(pause_before_submit, "pause_before_submit")
     check_boolean(pause_at_failed_question, "pause_at_failed_question")
