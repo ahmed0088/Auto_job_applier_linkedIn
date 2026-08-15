@@ -527,6 +527,17 @@ def _safe_extract_zip(zf: zipfile.ZipFile, dest_dir: str) -> None:
     zf.extractall(dest_dir)
 
 
+def _portable_category(rel_path: str) -> str | None:
+    '''Which PORTABLE_DATA_PATHS entry `rel_path` (forward-slash-separated) falls
+    under, or None if it isn't one of ours. Used to sanity-check every file in a
+    browser-uploaded folder server-side, rather than trusting the client-side filter.'''
+    for candidate in PORTABLE_DATA_PATHS:
+        candidate_norm = candidate.replace(os.sep, "/")
+        if rel_path == candidate_norm or rel_path.startswith(candidate_norm + "/"):
+            return candidate
+    return None
+
+
 @app.route('/api/import-data', methods=['POST'])
 def api_import_data():
     '''
@@ -596,6 +607,58 @@ def api_import_data_file():
 
     return jsonify({
         "imported": imported,
+        "errors": errors,
+        "profiles": list_profiles(),
+        "active": get_active_profile(),
+    })
+
+
+@app.route('/api/import-data-folder', methods=['POST'])
+def api_import_data_folder():
+    '''
+    Same as /api/import-data, but the source is a folder picked through the
+    browser's own native folder-browse dialog (an <input type="file"
+    webkitdirectory> - no typed/pasted path needed) instead of a path string.
+    Browsers don't expose that folder's real filesystem path to a webpage, so
+    the frontend uploads the individual files instead, each carrying its path
+    relative to the selected folder as its multipart filename - already
+    filtered client-side to just the portable-data files, but re-checked here
+    against PORTABLE_DATA_PATHS server-side too, since client-side filtering
+    is only a courtesy, never a security boundary.
+    '''
+    with _bot_lock:
+        if _is_running():
+            return jsonify({"error": "Stop the current run before importing data."}), 409
+    files = request.files.getlist('files')
+    if not files:
+        return jsonify({"error": "Didn't find anything recognizable to import in that folder."}), 400
+
+    imported = set()
+    errors = []
+    root_abs = os.path.abspath(ROOT)
+    for file in files:
+        rel_path = (file.filename or "").replace("\\", "/").lstrip("/")
+        category = _portable_category(rel_path)
+        if not category:
+            continue  # Not one of ours (e.g. .git, logs, screenshots) - silently skip
+        dst_abs = os.path.abspath(os.path.join(ROOT, rel_path))
+        if dst_abs != root_abs and not dst_abs.startswith(root_abs + os.sep):
+            errors.append(f"{rel_path}: unsafe path, skipped")
+            continue
+        try:
+            dst_dir = os.path.dirname(dst_abs)
+            if dst_dir:
+                os.makedirs(dst_dir, exist_ok=True)
+            file.save(dst_abs)
+            imported.add(category)
+        except OSError as err:
+            errors.append(f"{rel_path}: {err}")
+
+    if not imported and not errors:
+        return jsonify({"error": "Didn't find anything recognizable to import in that folder - is it the right project folder?"}), 400
+
+    return jsonify({
+        "imported": sorted(imported),
         "errors": errors,
         "profiles": list_profiles(),
         "active": get_active_profile(),
