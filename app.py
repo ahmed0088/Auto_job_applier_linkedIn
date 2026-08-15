@@ -465,6 +465,78 @@ def api_delete_profile(name):
     return jsonify({"profiles": list_profiles(), "active": get_active_profile()})
 
 
+@app.route('/api/import-data', methods=['POST'])
+def api_import_data():
+    '''
+    Copies saved data (secrets, personal info, and every profile - settings,
+    resume, application history) from another local copy of this project (e.g.
+    an older download) into this one. Lets someone moving to an updated
+    download skip re-entering everything by hand.
+
+    Only ever reads from the given `source_dir` and writes to this project's
+    own well-known paths (config/secrets.py, config/personals.py,
+    user_config.json, profiles/<name>/) - the source path never controls where
+    anything gets written, so there's no path-traversal write risk. This is a
+    local-only app (binds to 127.0.0.1), so accepting an arbitrary local
+    filesystem path to read from is the same trust model as resume upload.
+    '''
+    with _bot_lock:
+        if _is_running():
+            return jsonify({"error": "Stop the current run before importing data."}), 409
+    payload = request.get_json(silent=True) or {}
+    source_dir = str(payload.get("source_dir", "")).strip()
+    if not source_dir:
+        return jsonify({"error": "Please provide the path to your other project folder."}), 400
+    source_dir = os.path.expanduser(source_dir)
+    if not os.path.isdir(source_dir):
+        return jsonify({"error": f'"{source_dir}" is not a folder that exists on this computer.'}), 400
+    if os.path.abspath(source_dir) == os.path.abspath(ROOT):
+        return jsonify({"error": "That's this project's own folder - pick your OTHER copy instead."}), 400
+
+    imported = []
+    errors = []
+
+    def copy_file(rel_path):
+        src = os.path.join(source_dir, rel_path)
+        dst = os.path.join(ROOT, rel_path)
+        if not os.path.isfile(src):
+            return
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+            imported.append(rel_path)
+        except OSError as err:
+            errors.append(f"{rel_path}: {err}")
+
+    def copy_dir(rel_path):
+        src = os.path.join(source_dir, rel_path)
+        dst = os.path.join(ROOT, rel_path)
+        if not os.path.isdir(src):
+            return
+        try:
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+            imported.append(rel_path)
+        except OSError as err:
+            errors.append(f"{rel_path}: {err}")
+
+    copy_file(os.path.join("config", "secrets.py"))
+    copy_file(os.path.join("config", "personals.py"))
+    copy_file("user_config.json")
+    copy_dir("profiles")
+    copy_dir("all resumes")
+    copy_dir("all excels")
+
+    if not imported and not errors:
+        return jsonify({"error": "Didn't find anything to import in that folder - is it the right project folder?"}), 400
+
+    return jsonify({
+        "imported": imported,
+        "errors": errors,
+        "profiles": list_profiles(),
+        "active": get_active_profile(),
+    })
+
+
 @app.route('/api/config', methods=['GET'])
 def api_get_config():
     '''
