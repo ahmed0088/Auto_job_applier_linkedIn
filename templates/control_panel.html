@@ -995,6 +995,7 @@
         // ---- Profiles (run this tool for more than one LinkedIn account) ----
         var ADD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
         var TRASH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>';
+        var IMPORT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>';
 
         function renderProfileSwitcher(profiles, active) {
             var wrap = document.getElementById('profileSwitcher');
@@ -1013,6 +1014,10 @@
             var addBtn = el('button', { type: 'button', class: 'icon-btn', title: 'Add a new profile', 'aria-label': 'Add a new profile', html: ADD_ICON });
             addBtn.addEventListener('click', createProfile);
             wrap.appendChild(addBtn);
+
+            var importBtn = el('button', { type: 'button', class: 'icon-btn', title: 'Import saved data from another copy of this project', 'aria-label': 'Import saved data from another copy of this project', html: IMPORT_ICON });
+            importBtn.addEventListener('click', importData);
+            wrap.appendChild(importBtn);
 
             if (active !== 'default') {
                 var delBtn = el('button', { type: 'button', class: 'icon-btn danger', title: 'Delete this profile', 'aria-label': 'Delete this profile', html: TRASH_ICON });
@@ -1056,6 +1061,25 @@
                     switchProfile(name);
                 })
                 .catch(function () { alert('Could not create profile - is the control panel still running?'); });
+        }
+
+        function importData() {
+            var source = prompt("Path to your OTHER copy of this project (the one with your saved login, resume, and application history)?\n\nExample (Mac): /Users/you/Downloads/Auto_job_applier_linkedIn-main");
+            if (!source) return;
+            source = source.trim();
+            if (!source) return;
+            fetch('/api/import-data', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source_dir: source })
+            }).then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                .then(function (result) {
+                    if (!result.ok) { alert(result.data.error || 'Could not import data.'); return; }
+                    var msg = 'Imported: ' + (result.data.imported.length ? result.data.imported.join(', ') : 'nothing');
+                    if (result.data.errors && result.data.errors.length) msg += '\n\nProblems:\n' + result.data.errors.join('\n');
+                    alert(msg);
+                    location.reload();
+                })
+                .catch(function () { alert('Could not import data - is the control panel still running?'); });
         }
 
         function deleteProfile(name) {
