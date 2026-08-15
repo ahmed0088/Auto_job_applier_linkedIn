@@ -142,10 +142,40 @@ def print_lg(*msgs: str | dict, end: str = "\n", pretty: bool = False, flush: bo
                 file.write(str(message) + end)
     except Exception as e:
         trail = f'Skipped saving this message: "{message}" to log.txt!' if from_critical else "We'll try one more time to log..."
-        alert(f"log.txt in {logs_folder_path} is open or is occupied by another program! Please close it! {trail}", "Failed Logging")
+        try:
+            alert(f"log.txt in {logs_folder_path} is open or is occupied by another program! Please close it! {trail}", "Failed Logging")
+        except Exception:
+            pass  # No GUI backend (e.g. Tkinter missing) - don't let a failed dialog mask the original error
         if not from_critical:
             critical_error_log("Log.txt is open or is occupied by another program!", e)
 #>
+
+
+def safe_alert(text: str, title: str = "", button: str = "OK") -> str | None:
+    '''
+    Shows a pyautogui alert dialog. Never lets a missing/broken GUI backend
+    (e.g. Tkinter not installed, common on Homebrew Python on macOS) crash the
+    caller - logs and returns `None` instead of raising.
+    '''
+    try:
+        return alert(text, title, button)
+    except Exception as e:
+        print_lg(f'Could not show a dialog (title: "{title}"): {text}', e)
+        return None
+
+
+def safe_confirm(text: str, title: str = "", buttons: list | tuple = ("OK", "Cancel"), default: str | None = None) -> str | None:
+    '''
+    Shows a pyautogui confirm dialog. Never lets a missing/broken GUI backend
+    (e.g. Tkinter not installed, common on Homebrew Python on macOS) crash the
+    caller - logs and returns `default` instead of raising.
+    '''
+    try:
+        from pyautogui import confirm
+        return confirm(text, title, list(buttons))
+    except Exception as e:
+        print_lg(f'Could not show a dialog (title: "{title}"): {text}', e)
+        return default
 
 
 def buffer(speed: int=0) -> None:
@@ -186,7 +216,6 @@ def manual_login_retry(is_logged_in: callable, limit: int = 2) -> None:
     '''
     count = 0
     while not is_logged_in():
-        from pyautogui import alert
         print_lg("Seems like you're not logged in!")
         button = "Confirm Login"
         message = 'After you successfully Log In, please click "{}" button below.'.format(button)
@@ -194,7 +223,7 @@ def manual_login_retry(is_logged_in: callable, limit: int = 2) -> None:
             button = "Skip Confirmation"
             message = 'If you\'re seeing this message even after you logged in, Click "{}". Seems like auto login confirmation failed!'.format(button)
         count += 1
-        if alert(message, "Login Required", button) and count > limit: return
+        if safe_alert(message, "Login Required", button) and count > limit: return
 
 
 
