@@ -594,7 +594,12 @@
                 return li;
             }
             if (field.type === 'number') {
-                var nu = el('input', { type: 'number', id: id, step: 'any' });
+                var numAttrs = { type: 'number', id: id, step: 'any' };
+                if (field.validate) {
+                    if ('min' in field.validate) numAttrs.min = field.validate.min;
+                    if ('max' in field.validate) numAttrs.max = field.validate.max;
+                }
+                var nu = el('input', numAttrs);
                 nu.value = asText(value);
                 return nu;
             }
@@ -604,7 +609,12 @@
             if (field.models_by_provider) {
                 return makeModelControl(field, asText(value));
             }
-            var t = el('input', { type: 'text', id: id });
+            var textAttrs = { type: 'text', id: id };
+            if (field.validate && field.validate.pattern) {
+                textAttrs.pattern = field.validate.pattern;
+                textAttrs.title = field.validate.message || 'Not in the expected format';
+            }
+            var t = el('input', textAttrs);
             t.value = asText(value);
             return t;
         }
@@ -966,7 +976,30 @@
             return undefined;
         }
 
+        // Checks every rendered field's native HTML5 constraints (min/max/pattern,
+        // set from field.validate in renderControl) before we even try to save.
+        // The backend re-checks all of this too (the actual security/correctness
+        // boundary) - this is just so a mistake gets caught with an inline
+        // pointer at the exact field, instead of a generic error banner after a
+        // round trip to the server.
+        function validateAllFields() {
+            for (var i = 0; i < SCHEMA.length; i++) {
+                var fields = SCHEMA[i].fields;
+                for (var j = 0; j < fields.length; j++) {
+                    var field = fields[j];
+                    var input = document.getElementById(fieldId(field));
+                    if (!input || typeof input.reportValidity !== 'function') continue;
+                    if (!input.checkValidity()) {
+                        input.reportValidity();
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
         function saveConfig() {
+            if (!validateAllFields()) return;
             var payload = {};
             var changed = 0;
             SCHEMA.forEach(function (section) {

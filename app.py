@@ -218,6 +218,39 @@ def _coerce(field_type: str, value):
     return value
 
 
+def _validate_field(field: dict, value) -> None:
+    '''
+    Extra semantic validation on top of _coerce()'s type conversion - raises
+    ValueError (message goes straight into the API error response) if `value`
+    doesn't satisfy the field's rules. Never called for values _coerce()
+    already rejected.
+
+    - "select" fields must be one of `field["options"]`, always (this is the
+      one rule that isn't opt-in via `validate` - a select field is only ever
+      as good as its options list, so there's no reason not to enforce it).
+    - "number" fields respect an optional {"min": ..., "max": ...} in
+      `field["validate"]`.
+    - "text"/"textarea" fields respect an optional {"pattern": <regex>,
+      "message": <shown on failure>} - only checked when non-empty, so the
+      field can still be left blank to skip whatever question it answers.
+    '''
+    ftype = field["type"]
+    spec = field.get("validate") or {}
+
+    if ftype == "select" and "options" in field and value not in field["options"]:
+        raise ValueError(f"must be one of: {', '.join(repr(o) for o in field['options'])}")
+
+    if ftype == "number":
+        if "min" in spec and value < spec["min"]:
+            raise ValueError(f"must be at least {spec['min']}")
+        if "max" in spec and value > spec["max"]:
+            raise ValueError(f"must be at most {spec['max']}")
+
+    if ftype in ("text", "textarea") and value and "pattern" in spec:
+        if not re.fullmatch(spec["pattern"], value):
+            raise ValueError(spec.get("message") or "is not in the expected format")
+
+
 # ===========================================================================
 # Bot subprocess management (run / stop / status / logs)
 # ===========================================================================
@@ -794,7 +827,9 @@ def api_save_config():
                 unknown.append(f"{section}.{key}")
                 continue
             try:
-                coerced.setdefault(section, {})[key] = _coerce(field["type"], value)
+                coerced_value = _coerce(field["type"], value)
+                _validate_field(field, coerced_value)
+                coerced.setdefault(section, {})[key] = coerced_value
             except ValueError as err:
                 return jsonify({"error": f"Invalid value for '{section}.{key}': {err}"}), 400
 
