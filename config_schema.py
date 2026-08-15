@@ -31,6 +31,14 @@ Each field is a dict:
       "models_by_provider": (optional) suggestions for the model field, keyed by
                        AI provider; the UI shows them as a dropdown but still
                        accepts any typed-in model name,
+      "validate":      (optional) extra rules checked on save, on top of the type
+                       coercion every field already gets. For "number" fields:
+                       {"min": ..., "max": ...} (either optional). For "text"/
+                       "textarea" fields: {"pattern": <regex>, "message": <shown
+                       on failure>} - only checked when the value is non-empty,
+                       so the field can still be left blank to skip it. "select"
+                       fields are always validated against "options", with or
+                       without this key.
     }
 
 Field types:
@@ -65,7 +73,7 @@ AI_MODELS = {
 
 
 def _f(section, config_module, key, label, ftype, help,
-       options=None, advanced=False, ai=False, models_by_provider=None):
+       options=None, advanced=False, ai=False, models_by_provider=None, validate=None):
     field = {
         "section": section,
         "config_module": config_module,
@@ -82,6 +90,8 @@ def _f(section, config_module, key, label, ftype, help,
         field["ai"] = True
     if models_by_provider is not None:
         field["models_by_provider"] = models_by_provider
+    if validate is not None:
+        field["validate"] = validate
     return field
 
 
@@ -112,7 +122,8 @@ SCHEMA = [
             # --- advanced AI plumbing ---
             _f("Account", "secrets", "llm_api_url", "AI API URL", "text",
                "The address of your AI service. Examples: https://api.openai.com/v1/ , http://localhost:1234/v1/ , https://api.deepseek.com . Keep the trailing slash. You don't need this for Gemini or Anthropic.",
-               ai=True, advanced=True),
+               ai=True, advanced=True,
+               validate={"pattern": r"https?://.+", "message": "Should be a full URL starting with http:// or https://"}),
             _f("Account", "settings", "showAiErrorAlerts", "Show AI error alerts", "bool",
                "Pop up an alert if there's a problem connecting to the AI service.",
                ai=True, advanced=True),
@@ -141,15 +152,20 @@ SCHEMA = [
                "Your work-authorization / citizenship status for US applications.",
                options=["U.S. Citizen/Permanent Resident", "Non-citizen allowed to work for any employer", "Non-citizen allowed to work for current employer", "Non-citizen seeking work authorization", "Canadian Citizen/Permanent Resident", "Other"]),
             _f("Profile", "questions", "desired_salary", "Desired salary", "number",
-               "Your expected salary or CTC as a plain number (no currency symbols or commas), e.g. 100000. Some forms only accept numbers."),
+               "Your expected salary or CTC as a plain number (no currency symbols or commas), e.g. 100000. Some forms only accept numbers.",
+               validate={"min": 0}),
             _f("Profile", "questions", "current_ctc", "Current salary", "number",
-               "Your current salary or CTC as a plain number, e.g. 80000."),
+               "Your current salary or CTC as a plain number, e.g. 80000.",
+               validate={"min": 0}),
             _f("Profile", "questions", "notice_period", "Notice period (days)", "number",
-               "Your notice period in days, e.g. 0, 15, 30. The tool converts to weeks or months if a form asks that way."),
+               "Your notice period in days, e.g. 0, 15, 30. The tool converts to weeks or months if a form asks that way.",
+               validate={"min": 0}),
             _f("Profile", "questions", "linkedIn", "LinkedIn profile URL", "text",
-               "The link to your LinkedIn profile, e.g. https://www.linkedin.com/in/yourname ."),
+               "The link to your LinkedIn profile, e.g. https://www.linkedin.com/in/yourname .",
+               validate={"pattern": r"https?://.+", "message": "Should be a full URL starting with http:// or https://"}),
             _f("Profile", "questions", "website", "Portfolio website", "text",
-               "Link to your portfolio or personal website. Leave blank to skip this question."),
+               "Link to your portfolio or personal website. Leave blank to skip this question.",
+               validate={"pattern": r"https?://.+", "message": "Should be a full URL starting with http:// or https://"}),
             _f("Profile", "questions", "default_resume_path", "Default resume path", "text",
                "Path to the resume file to upload, relative to the project folder, e.g. all resumes/default/resume.pdf . If the file is missing, the tool keeps your last resume on LinkedIn."),
             # --- advanced / less-common details ---
@@ -182,9 +198,11 @@ SCHEMA = [
             _f("Profile", "questions", "recent_employer", "Most recent employer", "text",
                "The name of your most recent employer.", advanced=True),
             _f("Profile", "questions", "confidence_level", "Confidence level (1-10)", "text",
-               "For 'on a scale of 1-10, how much experience...' questions. Any number from 1 to 10.", advanced=True),
+               "For 'on a scale of 1-10, how much experience...' questions. Any number from 1 to 10.", advanced=True,
+               validate={"pattern": r"([1-9]|10)", "message": "Enter a whole number from 1 to 10."}),
             _f("Profile", "questions", "date_of_birth", "Date of birth", "text",
-               "Format: mm/dd/yyyy. Used to answer 'Date of birth' calendar-picker questions. Leave blank to skip such questions instead of guessing.", advanced=True),
+               "Format: mm/dd/yyyy. Used to answer 'Date of birth' calendar-picker questions. Leave blank to skip such questions instead of guessing.", advanced=True,
+               validate={"pattern": r"\d{2}/\d{2}/\d{4}", "message": "Use mm/dd/yyyy format, e.g. 01/31/1995."}),
         ],
     },
     {
@@ -206,10 +224,12 @@ SCHEMA = [
             _f("Search", "search", "on_site", "On-site / Remote", "list",
                "Filter by work setting, comma-separated. Valid values: On-site, Remote, Hybrid. Leave blank for all."),
             _f("Search", "search", "current_experience", "Your years of experience", "number",
-               "Your actual years of experience. Jobs asking for more than this are skipped. Set to -1 to ignore required experience and apply to everything."),
+               "Your actual years of experience. Jobs asking for more than this are skipped. Set to -1 to ignore required experience and apply to everything.",
+               validate={"min": -1}),
             # --- advanced search options ---
             _f("Search", "search", "switch_number", "Applications before switching term", "number",
-               "How many applications to submit for one search term before moving on to the next. A number greater than 0.", advanced=True),
+               "How many applications to submit for one search term before moving on to the next. A number greater than 0.", advanced=True,
+               validate={"min": 1}),
             _f("Search", "search", "randomize_search_order", "Randomize search order", "bool",
                "Shuffle the order your search terms are used.", advanced=True),
             _f("Search", "search", "sort_by", "Sort results by", "select",
