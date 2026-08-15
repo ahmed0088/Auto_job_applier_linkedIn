@@ -384,6 +384,7 @@
                 <p>Set up everything here, then open the Run tab to start. Nothing is uploaded - your details are saved only on this computer.</p>
             </div>
             <div id="profileSwitcher" class="profile-switcher"></div>
+            <input type="file" id="importFolderInput" webkitdirectory directory multiple style="display:none">
             <input type="file" id="importFileInput" accept=".zip" style="display:none">
         </div>
     </header>
@@ -1089,7 +1090,56 @@
                 .catch(function () { alert('Could not create profile - is the control panel still running?'); });
         }
 
+        // Files worth carrying between installs (mirrors PORTABLE_DATA_PATHS in app.py).
+        // Used to filter down a whole browsed folder to just these before uploading,
+        // so we don't ship your entire old project (logs, screenshots, .git, etc.)
+        // through the browser for no reason - the backend re-checks this too, this is
+        // just to keep the upload small and fast.
+        var PORTABLE_PREFIXES = ['config/secrets.py', 'config/personals.py', 'user_config.json', 'profiles/', 'all resumes/', 'all excels/'];
+        function isPortablePath(relPath) {
+            return PORTABLE_PREFIXES.some(function (p) { return relPath === p || relPath.indexOf(p) === 0; });
+        }
+
         function importData() {
+            // Prefer a real native folder-browse dialog; fall back to typing a path
+            // on browsers old enough not to support it.
+            var input = document.getElementById('importFolderInput');
+            if (input && ('webkitdirectory' in input)) { input.click(); return; }
+            importDataByPath();
+        }
+
+        (function () {
+            var input = document.getElementById('importFolderInput');
+            if (!input) return;
+            input.addEventListener('change', function (e) {
+                var files = Array.prototype.slice.call(e.target.files);
+                e.target.value = '';
+                if (!files.length) return;
+                var formData = new FormData();
+                var matched = 0;
+                files.forEach(function (file) {
+                    var rel = file.webkitRelativePath || file.name;
+                    var firstSlash = rel.indexOf('/');
+                    var relInProject = firstSlash === -1 ? rel : rel.slice(firstSlash + 1);
+                    if (!isPortablePath(relInProject)) return;
+                    matched++;
+                    formData.append('files', file, relInProject);
+                });
+                if (!matched) { alert("Didn't find anything recognizable (secrets.py, a profile, etc.) in that folder - is it the right project folder?"); return; }
+                fetch('/api/import-data-folder', { method: 'POST', body: formData })
+                    .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+                    .then(function (result) {
+                        if (!result.ok) { alert(result.data.error || 'Could not import that folder.'); return; }
+                        var msg = 'Imported: ' + (result.data.imported.length ? result.data.imported.join(', ') : 'nothing');
+                        if (result.data.errors && result.data.errors.length) msg += '\n\nProblems:\n' + result.data.errors.join('\n');
+                        alert(msg);
+                        location.reload();
+                    })
+                    .catch(function () { alert('Could not import that folder - is the control panel still running?'); });
+            });
+        })();
+
+        function importDataByPath() {
             var source = prompt("Path to your OTHER copy of this project (the one with your saved login, resume, and application history)?\n\nExample (Mac): /Users/you/Downloads/Auto_job_applier_linkedIn-main");
             if (!source) return;
             source = source.trim();
